@@ -1,0 +1,15 @@
+# Default owners.
+*                       @raceguard/maintainers
+
+# The contract file is frozen: changes are a team decision, not a pull request.
+# Two adapters that both reimplement orchestration drift within a month.
+/raceguard/contracts.py @raceguard/maintainers
+
+# Changing a label to make a test pass fixes the metric instead of the bug, so
+# corpus labels get a second pair of eyes.
+/tests/corpus/labels.yaml @raceguard/maintainers
+
+# Anything that fires requests or touches Docker.
+/raceguard/harness/     @raceguard/maintainers
+/.github/workflows/     @raceguard/maintainers
+/SECURITY.md            @raceguard/maintainers

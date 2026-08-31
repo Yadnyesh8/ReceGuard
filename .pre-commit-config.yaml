@@ -1,0 +1,46 @@
+# Fast checks only. Anything that needs Docker belongs in CI, not on commit:
+# a thirty second wait on commit gets the hook removed, and a hook that has
+# been removed protects nothing.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^tests/corpus/
+      - id: end-of-file-fixer
+        exclude: ^tests/corpus/
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        files: ^raceguard/
+        additional_dependencies: [pydantic>=2.7, types-PyYAML]
+        args: [--ignore-missing-imports]
+
+  # RaceGuard on RaceGuard's own reference app. Scan only, high confidence
+  # only, no Docker.
+  - repo: local
+    hooks:
+      - id: raceguard-self
+        name: raceguard (self-scan of examples/shop)
+        entry: python -m raceguard.cli scan examples/shop --min-confidence high --fail-on never
+        language: system
+        pass_filenames: false
+        files: ^(raceguard|examples)/

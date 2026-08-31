@@ -1,0 +1,23 @@
+name: Missed race
+description: A real read-decide-write window RaceGuard did not report.
+title: "[FN] "
+labels: ["false-negative", "scanner"]
+body:
+  - type: textarea
+    id: handler
+    attributes:
+      label: The handler
+      render: python
+    validations: {required: true}
+  - type: textarea
+    id: race
+    attributes:
+      label: The interleaving
+      description: |
+        The two request sequence that produces the wrong state. Use the T1/T2
+        form from the README if it helps.
+    validations: {required: true}
+  - type: input
+    id: version
+    attributes: {label: Version}
+    validations: {required: true}

@@ -1,0 +1,35 @@
+# A tool that people run with Docker access is a tool worth attacking, so its
+# dependencies are kept current deliberately rather than when someone notices.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        patterns: ["pytest*", "ruff", "mypy"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "ci"]
+
+  # The reference app is deliberately vulnerable to RACE CONDITIONS, not to
+  # known CVEs. Its dependencies still get updated.
+  - package-ecosystem: "pip"
+    directory: "/examples/shop"
+    schedule:
+      interval: "monthly"
+    labels: ["dependencies", "examples"]
+
+  - package-ecosystem: "docker"
+    directory: "/examples/shop"
+    schedule:
+      interval: "monthly"
+    labels: ["dependencies", "examples"]

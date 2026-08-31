@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv pip install --system -e ".[dev,harness,mcp]"
+      - name: ruff
+        run: ruff check raceguard tests
+      - name: ruff format
+        run: ruff format --check raceguard
+      - name: mypy
+        # Not continue-on-error. A type check that is allowed to fail is a
+        # type check nobody reads.
+        run: mypy raceguard
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install ${{ matrix.python }}
+      - run: uv pip install --system -e ".[dev,harness,mcp]"
+      - name: unit and scanner tests (no Docker)
+        run: pytest tests -q -m "not docker" --cov=raceguard --cov-report=xml --cov-report=term-missing:skip-covered
+      - name: enforce the coverage floor
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          rate = float(ET.parse("coverage.xml").getroot().get("line-rate", 0)) * 100
+          floor = 55.0
+          # This job excludes the Docker suite, which is what exercises the
+          # harness. The floor is set for what runs HERE; the integration job
+          # covers the rest.
+          print(f"line coverage {rate:.1f}% (floor {floor:.0f}%)")
+          sys.exit(0 if rate >= floor else 1)
+          PY
+      - name: corpus evaluation gates
+        run: python tests/eval_corpus.py
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv pip install --system -e ".[dev,harness,mcp]"
+      - name: full pipeline against a real PostgreSQL
+        run: pytest tests -q -m docker
+      - name: the tool's own container image builds
+        run: docker build -t raceguard:ci .
+
+  self-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv pip install --system -e ".[harness]"
+      - name: scan the reference app
+        run: |
+          raceguard scan examples/shop --format sarif -o raceguard.sarif --hygiene || true
+      - name: upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: raceguard.sarif
+          category: raceguard-example

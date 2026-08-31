@@ -1,0 +1,38 @@
+name: False positive
+description: RaceGuard flagged a handler that is actually guarded.
+title: "[FP] "
+labels: ["false-positive", "scanner"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A false positive costs the tool, so these are treated as high priority.
+
+        If the guard is real but lives somewhere RaceGuard cannot see (an
+        upstream queue, a proxy, a service boundary), that is expected: use a
+        suppression with a reason. This template is for a guard that IS in the
+        code and was not recognised.
+  - type: textarea
+    id: handler
+    attributes:
+      label: The handler
+      description: The smallest version that still reproduces the finding.
+      render: python
+    validations: {required: true}
+  - type: textarea
+    id: finding
+    attributes:
+      label: What RaceGuard reported
+      description: "Output of `raceguard scan <path> --min-confidence low`."
+      render: shell
+    validations: {required: true}
+  - type: textarea
+    id: guard
+    attributes:
+      label: Why this handler is actually guarded
+      description: Name the mechanism that prevents a second request entering the gap.
+    validations: {required: true}
+  - type: input
+    id: version
+    attributes: {label: Version, description: "Output of `raceguard version`."}
+    validations: {required: true}

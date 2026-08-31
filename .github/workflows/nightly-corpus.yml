@@ -1,0 +1,31 @@
+# Section 8.6: the nightly corpus job records reproduction rate per fixture over
+# time. A fixture whose rate drifts is a HARNESS bug, not a code change, and you
+# want that visible as a trend rather than as a surprise in submission week.
+name: Nightly corpus
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv pip install --system -e ".[dev,harness]"
+
+      - name: scanner gates
+        run: python tests/eval_corpus.py | tee corpus-report.txt
+
+      - name: reproduction rates over the reference app
+        run: pytest tests/test_integration.py -q -m docker | tee -a corpus-report.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: corpus-report-${{ github.run_number }}
+          path: corpus-report.txt
+          retention-days: 90

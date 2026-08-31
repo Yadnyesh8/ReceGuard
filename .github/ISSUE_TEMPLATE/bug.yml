@@ -1,0 +1,25 @@
+name: Bug
+description: Something is broken.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every run writes `.raceguard/runs/<timestamp>-<id>/` with the resolved
+        config, findings, invariants, verdicts, and trial records. Secrets are
+        redacted at write time. Attaching that folder is usually the fastest
+        path to a fix.
+  - type: textarea
+    id: what
+    attributes: {label: What happened}
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes: {label: What you expected}
+    validations: {required: true}
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`raceguard doctor` output"
+      render: shell
+    validations: {required: true}
