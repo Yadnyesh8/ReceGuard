@@ -1,0 +1,525 @@
+# RaceGuard test corpus labels.
+#
+# One entry per fixture file under vulnerable/ or safe/. Ground truth is
+# derived from the code (and, where relevant, the schema in models.py)
+# alone -- see the module docstring in each fixture for the justification.
+#
+# Field notes:
+#   pattern           one of the five Pattern literals for vulnerable
+#                      fixtures, always null for safe fixtures.
+#   guard             the guard name from the section 6.2 table that makes
+#                      a safe fixture safe, or null (vulnerable fixtures,
+#                      and safe fixtures guarded by something the scanner's
+#                      table does not recognise -- see the suppressed_*
+#                      fixtures, whose real guard is out of the scanner's
+#                      view by design).
+#   guard_partial     set only for the SERIALIZABLE-without-retry case,
+#                      naming the partial guard the scanner should report.
+#   invariant_kind    one of the five InvariantKind literals, or null when
+#                      the fixture's bug (or non-bug) does not cleanly map
+#                      to one of the five.
+
+fixtures:
+  # ---------------------------------------------------------------------
+  # vulnerable/ -- oversell
+  # ---------------------------------------------------------------------
+  - file: vulnerable/oversell_basic.py
+    handler: create_order
+    route: "POST /orders"
+    vulnerable: true
+    pattern: oversell
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Read, threshold check, and decrement all sit in one scope with no lock, atomic expression, or version check on the path."
+
+  - file: vulnerable/oversell_query_filter_first.py
+    handler: create_order_legacy
+    route: "POST /orders/legacy"
+    vulnerable: true
+    pattern: oversell
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Same unguarded read-check-decrement as oversell_basic, via Query.filter().first() instead of session.get()."
+
+  - file: vulnerable/oversell_execute_select.py
+    handler: create_order_execute
+    route: "POST /orders/execute-form"
+    vulnerable: true
+    pattern: oversell
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "session.execute(select(...)) read and session.execute(update(...).values(stock=<python literal>)) write, with no atomic column expression and no lock."
+
+  - file: vulnerable/oversell_helper_write.py
+    handler: create_order_helper_write
+    route: "POST /orders/helper-write"
+    vulnerable: true
+    pattern: oversell
+    expected_confidence: medium
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Read and threshold decision are inline, but the decrement write is issued from a helper function, which pass 3 caps at medium confidence."
+
+  - file: vulnerable/oversell_router_prefix.py
+    handler: create_order_v1
+    route: "POST /api/v1/orders"
+    vulnerable: true
+    pattern: oversell
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Identical unguarded oversell to oversell_basic, expressed via APIRouter(prefix='/api/v1') + router.post to exercise composed-path resolution."
+
+  - file: vulnerable/oversell_dynamic_sql_concat.py
+    handler: create_order_dynamic
+    route: "POST /orders/dynamic"
+    vulnerable: true
+    pattern: oversell
+    expected_confidence: low
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Genuine unguarded oversell, but both the read and write SQL are built by runtime string concatenation, so the scanner cannot statically resolve the query and must land at low confidence, not high/medium and not cleared."
+
+  - file: vulnerable/oversell_two_helpers.py
+    handler: create_order_two_helpers
+    route: "POST /orders/two-helpers"
+    vulnerable: true
+    pattern: oversell
+    expected_confidence: medium
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Both the read (_load_item) and the write (_commit_decrement) are pushed into separate helper functions, crossing two call boundaries with no guard on either."
+
+  # ---------------------------------------------------------------------
+  # vulnerable/ -- lost_update
+  # ---------------------------------------------------------------------
+  - file: vulnerable/lost_update_balance_overwrite.py
+    handler: transfer_funds
+    route: "POST /transfers"
+    vulnerable: true
+    pattern: lost_update
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "Sender and receiver balances are each read then blindly overwritten with a Python-computed value; no atomic expression, lock, or version check protects either write."
+
+  - file: vulnerable/lost_update_async_def_sync_session.py
+    handler: deposit
+    route: "POST /accounts/{account_id}/deposit"
+    vulnerable: true
+    pattern: lost_update
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "Awkward case: async def handler using a synchronous Session. The deposit is still a blind read-modify-write on balance with no guard anywhere on the path."
+
+  - file: vulnerable/lost_update_serializable_no_retry.py
+    handler: deposit_serializable
+    route: "POST /accounts/{account_id}/deposit-serializable"
+    vulnerable: true
+    pattern: lost_update
+    expected_confidence: medium
+    guard: null
+    guard_partial: serializable
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "Engine isolation_level is SERIALIZABLE, which the guard table treats as only a partial guard; no retry wrapper catches the 40001 serialization failure, so this must not read as a full guard."
+
+  - file: vulnerable/lost_update_helper_read.py
+    handler: withdraw_helper_read
+    route: "POST /accounts/{account_id}/withdraw-helper-read"
+    vulnerable: true
+    pattern: lost_update
+    expected_confidence: medium
+    guard: null
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "The read (_load_account) crosses a call boundary into a helper while the blind overwrite write stays inline; pass 3 caps cross-helper linking at medium confidence."
+
+  # ---------------------------------------------------------------------
+  # vulnerable/ -- single_use
+  # ---------------------------------------------------------------------
+  - file: vulnerable/single_use_coupon_redeem.py
+    handler: redeem_coupon
+    route: "POST /coupons/{coupon_id}/redeem"
+    vulnerable: true
+    pattern: single_use
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [coupons]
+    invariant_kind: single_use
+    why: "The redeemed boolean is read, checked, and flipped in three separate steps with no atomic compare-and-set and no row lock."
+
+  - file: vulnerable/single_use_invite_token.py
+    handler: accept_invite
+    route: "POST /invites/{token}/accept"
+    vulnerable: true
+    pattern: single_use
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [invites]
+    invariant_kind: single_use
+    why: "Same read-check-flip race as single_use_coupon_redeem, on the invites.used flag, routed via APIRouter/router.post instead of app.post."
+
+  # ---------------------------------------------------------------------
+  # vulnerable/ -- duplicate_insert
+  # ---------------------------------------------------------------------
+  - file: vulnerable/duplicate_insert_signup.py
+    handler: create_signup
+    route: "POST /signups"
+    vulnerable: true
+    pattern: duplicate_insert
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [signups]
+    invariant_kind: duplicate_insert
+    why: "Check-then-insert against models.Signup, whose email column carries no unique constraint, so two concurrent signups for one email can both miss the lookup and both insert."
+
+  - file: vulnerable/duplicate_insert_idempotency_lookup_then_act.py
+    handler: create_order_idempotent
+    route: "POST /orders/idempotent"
+    vulnerable: true
+    pattern: duplicate_insert
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [orders]
+    invariant_kind: duplicate_insert
+    why: "Idempotency key is looked up then acted on against models.Order, which has no unique constraint on idempotency_key, so a retried request can race the original and create two orders for one key."
+
+  - file: vulnerable/duplicate_insert_follow_relationship.py
+    handler: follow_user
+    route: "POST /social/follow"
+    vulnerable: true
+    pattern: duplicate_insert
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [follows]
+    invariant_kind: duplicate_insert
+    why: "Check-then-insert against models.Follow, whose (follower_id, followee_id) pair carries no unique constraint, so a duplicate follow row can be created by a race."
+
+  - file: vulnerable/duplicate_insert_review_per_user.py
+    handler: create_review
+    route: "POST /products/{product_id}/reviews"
+    vulnerable: true
+    pattern: duplicate_insert
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [pending_reviews]
+    invariant_kind: duplicate_insert
+    why: "Check-then-insert against models.PendingReview, which has no unique constraint on (user_id, product_id), unlike its guarded twin models.Review."
+
+  # ---------------------------------------------------------------------
+  # vulnerable/ -- aggregate_limit
+  # ---------------------------------------------------------------------
+  - file: vulnerable/aggregate_limit_team_members.py
+    handler: add_team_member
+    route: "POST /teams/{team_id}/members"
+    vulnerable: true
+    pattern: aggregate_limit
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [team_members, teams]
+    invariant_kind: aggregate_limit
+    why: "Count-then-insert against team_members with no lock or constraint tying the count to the insert, so two concurrent joins can both pass the count(*) < member_limit check."
+
+  - file: vulnerable/aggregate_limit_credit_limit.py
+    handler: create_charge
+    route: "POST /charges"
+    vulnerable: true
+    pattern: aggregate_limit
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [pending_charges, credit_accounts]
+    invariant_kind: aggregate_limit
+    why: "Sum-then-insert against pending_charges with no lock, so two concurrent charges can both see the same pre-charge SUM and both pass the credit_limit check."
+
+  - file: vulnerable/aggregate_limit_session_cap.py
+    handler: create_session
+    route: "POST /sessions"
+    vulnerable: true
+    pattern: aggregate_limit
+    expected_confidence: medium
+    guard: null
+    guard_partial: null
+    tables: [user_sessions]
+    invariant_kind: aggregate_limit
+    why: "The active-session count check is inline but the insert is issued from a helper function (_insert_session) one call away, capping confidence at medium."
+
+  # ---------------------------------------------------------------------
+  # safe/ -- one fixture per guard from the section 6.2 table
+  # ---------------------------------------------------------------------
+  - file: safe/with_for_update_oversell.py
+    handler: create_order
+    route: "POST /orders"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: with_for_update
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "The read locks the row with .with_for_update() before the threshold check, so a concurrent transaction blocks until the first commits."
+
+  - file: safe/atomic_expression_update.py
+    handler: create_order_atomic
+    route: "POST /orders/atomic"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: atomic_expression
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Deliberately shaped to look like a flaggable read-then-write to a naive matcher, but the UPDATE's SET clause is stock=Item.stock - qty (self-referencing) guarded by a WHERE stock >= qty, evaluated atomically by Postgres."
+
+  - file: safe/duplicate_insert_claim_first.py
+    handler: create_order_claim_first
+    route: "POST /orders/idempotent-claim-first"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: on_conflict
+    guard_partial: null
+    tables: [idempotent_orders]
+    invariant_kind: duplicate_insert
+    why: "Claims the idempotency key first via INSERT ... ON CONFLICT DO NOTHING against models.IdempotentOrder's unique idempotency_key column, then reads back whichever row won, fixing the lookup-then-act race in the paired vulnerable fixture."
+
+  - file: safe/raw_for_update_text.py
+    handler: create_order_raw_for_update
+    route: "POST /orders/raw-for-update"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: raw_for_update
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "The read is a raw text() query with FOR UPDATE embedded in the SQL literal, one of the recognised guard shapes via keyword sniffing on the literal."
+
+  - file: safe/advisory_lock_team_members.py
+    handler: add_team_member
+    route: "POST /teams/{team_id}/members"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: advisory_lock
+    guard_partial: null
+    tables: [team_members, teams]
+    invariant_kind: aggregate_limit
+    why: "pg_advisory_xact_lock keyed on team_id is acquired before the count-then-insert, serializing concurrent joins for the same team. Pairs with vulnerable/aggregate_limit_team_members.py."
+
+  - file: safe/unique_constraint_review_per_user.py
+    handler: create_review_guarded
+    route: "POST /products/{product_id}/reviews-guarded"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: unique_constraint
+    guard_partial: null
+    tables: [reviews]
+    invariant_kind: duplicate_insert
+    why: "Writes into models.Review, whose (user_id, product_id) pair is uniquely constrained; the loser of a concurrent insert race gets an IntegrityError, caught and reported rather than creating a duplicate row."
+
+  - file: safe/serializable_with_retry.py
+    handler: deposit_serializable_retried
+    route: "POST /accounts/{account_id}/deposit-serializable-retried"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: serializable
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "SERIALIZABLE isolation plus a retry_wrapper decorator that catches 40001 serialization failures and re-issues the whole transaction, completing the partial serializable guard. Pairs with vulnerable/lost_update_serializable_no_retry.py."
+
+  - file: safe/version_check_async_bridge.py
+    handler: deposit_versioned_bridge
+    route: "POST /accounts/{account_id}/deposit-versioned-bridge"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: version_check
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "Awkward case: a sync def handler bridging into an async engine via asyncio.run(). The UPDATE's WHERE clause pins version to the value that was read, so a concurrent writer causes rowcount==0 instead of a silent overwrite."
+
+  # ---------------------------------------------------------------------
+  # safe/ -- awkward cases and additional guard variety
+  # ---------------------------------------------------------------------
+  - file: safe/guard_in_helper_with_for_update.py
+    handler: create_order_guard_in_helper
+    route: "POST /orders/guard-in-helper"
+    vulnerable: false
+    pattern: null
+    expected_confidence: medium
+    guard: with_for_update
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Awkward case: the .with_for_update() row lock lives inside a helper function (_load_item_locked) called by the handler rather than appearing directly in the handler body, so guard detection must follow the call, capping confidence at medium."
+
+  - file: safe/single_use_unique_constraint_redeem.py
+    handler: redeem_coupon_guarded
+    route: "POST /coupons/{coupon_id}/redeem-guarded"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: unique_constraint
+    guard_partial: null
+    tables: [unique_coupon_redemptions, coupons]
+    invariant_kind: single_use
+    why: "Redemption is recorded as an insert into models.UniqueCouponRedemption, whose (coupon_id, user_id) pair is uniquely constrained; the losing insert's IntegrityError is caught instead of applying the discount twice."
+
+  - file: safe/aggregate_limit_advisory_lock_router.py
+    handler: create_session_locked
+    route: "POST /api/v1/sessions"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: advisory_lock
+    guard_partial: null
+    tables: [user_sessions]
+    invariant_kind: aggregate_limit
+    why: "pg_advisory_xact_lock keyed on user_id is acquired before the count-then-insert, routed via APIRouter/router.post. Pairs with vulnerable/aggregate_limit_session_cap.py."
+
+  - file: safe/lost_update_version_check_optimistic.py
+    handler: adjust_balance_versioned
+    route: "POST /accounts/{account_id}/adjust-versioned"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: version_check
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "The UPDATE's WHERE clause requires version to match the value that was read; a concurrent writer bumps version first, causing rowcount==0 instead of a lost update. Pairs with vulnerable/lost_update_balance_overwrite.py."
+
+  - file: safe/oversell_serializable_retry_router.py
+    handler: create_order_serializable_retried
+    route: "POST /api/v1/orders-serializable-retried"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: serializable
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "SERIALIZABLE isolation plus a retry_wrapper decorator on the oversell scenario, routed via APIRouter/router.post, variety on the serializable+retry pairing."
+
+  - file: safe/duplicate_insert_unique_signup.py
+    handler: create_signup_guarded
+    route: "POST /signups-guarded"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: unique_constraint
+    guard_partial: null
+    tables: [unique_signups]
+    invariant_kind: duplicate_insert
+    why: "Writes into models.UniqueSignup, whose email column is unique at the schema level; the losing insert's IntegrityError is caught and reported rather than creating a duplicate row. Pairs with vulnerable/duplicate_insert_signup.py."
+
+  - file: safe/oversell_with_for_update_router.py
+    handler: create_order_locked
+    route: "POST /api/v1/orders-locked"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: with_for_update
+    guard_partial: null
+    tables: [items]
+    invariant_kind: non_negative
+    why: "Same with_for_update guard as with_for_update_oversell.py, expressed via APIRouter/router.post so the guard is covered on both route decorator forms."
+
+  - file: safe/single_use_atomic_expression_flag.py
+    handler: redeem_coupon_atomic
+    route: "POST /coupons/{coupon_id}/redeem-atomic"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: atomic_expression
+    guard_partial: null
+    tables: [coupons]
+    invariant_kind: single_use
+    why: "atomic_expression applied to a boolean flag: one UPDATE with WHERE redeemed = False and SET redeemed = True, checked via rowcount, with no prior SELECT to go stale."
+
+  - file: safe/duplicate_insert_advisory_lock.py
+    handler: create_signup_locked
+    route: "POST /signups-locked"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: advisory_lock
+    guard_partial: null
+    tables: [signups]
+    invariant_kind: duplicate_insert
+    why: "pg_advisory_xact_lock keyed on a hash of the email serializes concurrent signups for the same address before the check-then-insert against the unconstrained models.Signup table runs."
+
+  # ---------------------------------------------------------------------
+  # safe/ -- suppression comments (>= 3 required)
+  # ---------------------------------------------------------------------
+  - file: safe/suppressed_lost_update_app_lock.py
+    handler: deposit_app_lock
+    route: "POST /accounts/{account_id}/deposit-app-lock"
+    vulnerable: false
+    pattern: null
+    expected_confidence: low
+    guard: null
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: conservation
+    why: "Genuinely guarded by a per-account threading.Lock, a mechanism outside the scanner's recognised guard table; suppressed with `# raceguard: ignore[lost_update] ...` naming the reason, which is what makes it auditable rather than silently cleared."
+
+  - file: safe/suppressed_duplicate_insert_external_dedup.py
+    handler: handle_payment_event
+    route: "POST /webhooks/payment-events"
+    vulnerable: false
+    pattern: null
+    expected_confidence: low
+    guard: null
+    guard_partial: null
+    tables: [webhook_events]
+    invariant_kind: duplicate_insert
+    why: "The code alone is a textbook lookup-then-act duplicate_insert race against the unconstrained webhook_events table; it is only safe because delivery is deduped upstream by an external proxy the scanner cannot see, hence the explicit suppression comment rather than silent clearance."
+
+  - file: safe/suppressed_aggregate_limit_queue_serialized.py
+    handler: add_team_member_queued
+    route: "POST /teams/{team_id}/members-queued"
+    vulnerable: false
+    pattern: null
+    expected_confidence: low
+    guard: null
+    guard_partial: null
+    tables: [team_members, teams]
+    invariant_kind: aggregate_limit
+    why: "Textbook count-then-insert aggregate_limit shape, made safe only because the handler is enqueued onto a per-team single-consumer queue the scanner cannot see into; suppressed with a named reason rather than silently cleared."
