@@ -1,0 +1,16 @@
+# Scan only, staged files only, high confidence only, no Docker.
+#
+# The verify step never belongs in a pre-commit hook. A thirty second wait on
+# commit gets the hook removed, and a hook that has been removed protects
+# nothing.
+- id: raceguard
+  name: raceguard
+  description: >-
+    Static scan for read-modify-write windows in changed Python files. Fast,
+    no Docker, fails only on high confidence findings.
+  entry: raceguard scan
+  args: ["--min-confidence", "high", "--fail-on", "high", "--format", "text"]
+  language: python
+  types: [python]
+  require_serial: false
+  pass_filenames: true

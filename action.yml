@@ -1,0 +1,68 @@
+name: "RaceGuard"
+description: >-
+  Find, prove, and repair atomicity violations in Python HTTP handlers.
+  Scans on every push and, optionally, verifies only the targets whose handler
+  files appear in the diff.
+author: "RaceGuard"
+branding:
+  icon: "git-merge"
+  color: "orange"
+
+inputs:
+  path:
+    description: "Directory to scan."
+    required: false
+    default: "."
+  fail-on:
+    description: "Gate the build on this confidence level: high, medium, low, or never."
+    required: false
+    default: "high"
+  verify:
+    description: >-
+      Also run dynamic verification for targets whose handler changed in this
+      diff. Requires Docker on the runner and a raceguard.yaml.
+    required: false
+    default: "false"
+  hygiene:
+    description: "Also run the idempotency, rate limit, and optimistic concurrency rules."
+    required: false
+    default: "true"
+  sarif-file:
+    description: "Where to write the SARIF 2.1.0 results."
+    required: false
+    default: "raceguard.sarif"
+  category:
+    description: >-
+      SARIF category. If more than one results file is uploaded for this tool in
+      one workflow, each needs a distinct category.
+    required: false
+    default: "raceguard"
+
+outputs:
+  findings:
+    description: "Number of findings."
+  violations:
+    description: "Number of targets whose invariant was violated."
+  sarif:
+    description: "Path to the SARIF file."
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install RaceGuard
+      shell: bash
+      run: pip install "raceguard[harness]"
+    - name: Run RaceGuard
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_VERIFY: ${{ inputs.verify }}
+        INPUT_HYGIENE: ${{ inputs.hygiene }}
+        INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_CATEGORY: ${{ inputs.category }}
+      run: python -m raceguard.action.entrypoint
