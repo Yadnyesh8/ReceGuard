@@ -124,6 +124,6 @@ check_untyped_defs = true
 # than suppressed inline so it stays visible and can be deleted when v1
 # support is dropped.
 [[tool.mypy.overrides]]
-module = "raceguard.mcp_server"
+module = "raceguard.mcp.server"
 warn_unused_ignores = false
 disable_error_code = ["attr-defined", "no-redef", "assignment"]

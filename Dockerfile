@@ -9,6 +9,12 @@
 #     ghcr.io/raceguard/raceguard scan .
 #
 # `scan` needs no socket at all. Only `verify` and `fix --apply` do.
+#
+# The same image hosts the MCP server:
+#
+#   docker run --rm -p 8765:8765 -e RACEGUARD_MCP_TRANSPORT=http \
+#     -e RACEGUARD_MCP_HOST=0.0.0.0 -e RACEGUARD_MCP_TOKENS=s3cret \
+#     -v "$PWD:/src" ghcr.io/raceguard/raceguard mcp serve
 
 FROM python:3.12-slim AS build
 

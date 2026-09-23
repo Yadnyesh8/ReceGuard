@@ -1,0 +1,51 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.raceguard/raceguard",
+  "description": "Find, prove, and repair read-decide-write races in Python HTTP handlers. Static scan is free; verification boots an ephemeral PostgreSQL and is budgeted.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/raceguard/raceguard",
+    "source": "github"
+  },
+  "version_detail": {
+    "version": "0.1.0"
+  },
+  "packages": [
+    {
+      "registry_name": "pypi",
+      "name": "raceguard",
+      "version": "0.1.0",
+      "runtime_hint": "python",
+      "package_arguments": [
+        { "type": "positional", "value": "mcp" },
+        { "type": "positional", "value": "serve" }
+      ],
+      "environment_variables": [
+        {
+          "name": "RACEGUARD_MCP_ROOT",
+          "description": "Project root every path is sandboxed to. Defaults to the working directory.",
+          "is_required": false
+        },
+        {
+          "name": "RACEGUARD_MCP_VERIFY",
+          "description": "Set to false to disable verify_handler where Docker is unavailable.",
+          "is_required": false
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "transport_type": "streamable-http",
+      "url": "https://YOUR-HOST/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer token from RACEGUARD_MCP_TOKENS on the server.",
+          "is_required": true,
+          "is_secret": true
+        }
+      ]
+    }
+  ]
+}
