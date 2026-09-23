@@ -33,12 +33,12 @@ async def handle_payment_event(external_id: str, session: AsyncSession):
     assert_not_seen_upstream(external_id)
 
     existing = (
-        await session.execute(
-            select(WebhookEvent).where(WebhookEvent.external_id == external_id)
-        )
+        await session.execute(select(WebhookEvent).where(WebhookEvent.external_id == external_id))
     ).scalar_one_or_none()
     if existing is not None:
-        return {"processed": False}  # raceguard: ignore[duplicate_insert] deduped upstream by the payment provider's delivery proxy before reaching this handler
+        return {
+            "processed": False
+        }  # raceguard: ignore[duplicate_insert] deduped upstream by the payment provider's delivery proxy before reaching this handler
     event = WebhookEvent(external_id=external_id, processed=True)
     session.add(event)
     await session.commit()

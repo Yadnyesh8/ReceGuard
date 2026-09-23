@@ -23,9 +23,7 @@ app = FastAPI()
 
 
 @app.post("/accounts/{account_id}/adjust-versioned")
-async def adjust_balance_versioned(
-    account_id: int, delta: float, session: AsyncSession
-):
+async def adjust_balance_versioned(account_id: int, delta: float, session: AsyncSession):
     account = (
         await session.execute(select(Account).where(Account.id == account_id))
     ).scalar_one_or_none()

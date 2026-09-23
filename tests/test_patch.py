@@ -21,8 +21,14 @@ from raceguard.patch.strategies import choose
 def finding(pattern, *, snippet="if item.stock < qty:", partial=None, file="a.py") -> Finding:
     span = CodeSpan(file=file, start_line=1, end_line=1, snippet=snippet)
     return Finding(
-        id="x", handler="m:h", pattern=pattern, read_site=span, write_site=span,
-        decision_site=span, confidence=Confidence.high, explanation="",
+        id="x",
+        handler="m:h",
+        pattern=pattern,
+        read_site=span,
+        write_site=span,
+        decision_site=span,
+        confidence=Confidence.high,
+        explanation="",
         guard_partial=partial,
     )
 
@@ -38,8 +44,12 @@ def finding(pattern, *, snippet="if item.stock < qty:", partial=None, file="a.py
         ("duplicate_insert", "if existing is None:", None, "insert_on_conflict"),
         ("aggregate_limit", "if count >= 5:", None, "advisory_lock"),
         ("lost_update", "x = 1", None, "optimistic_version"),
-        ("oversell", "if item.stock < qty:", "serializable isolation, no retry wrapper",
-         "serializable_retry"),
+        (
+            "oversell",
+            "if item.stock < qty:",
+            "serializable isolation, no retry wrapper",
+            "serializable_retry",
+        ),
     ],
 )
 def test_strategy_selection(pattern, snippet, partial, expected):
@@ -108,8 +118,11 @@ def test_every_patch_applies_and_parses(shop, shop_patches):
             copy = scratch / "app"
             shutil.copytree(shop, copy)
             applied = subprocess.run(
-                ["git", "apply", "-"], cwd=copy, input=patch.diff,
-                capture_output=True, text=True,
+                ["git", "apply", "-"],
+                cwd=copy,
+                input=patch.diff,
+                capture_output=True,
+                text=True,
             )
             assert applied.returncode == 0, f"{item.route}: {applied.stderr}"
             source = (copy / item.read_site.file).read_text()
@@ -128,8 +141,9 @@ def test_patched_code_defines_every_name_it_uses(shop, shop_patches):
         try:
             copy = scratch / "app"
             shutil.copytree(shop, copy)
-            subprocess.run(["git", "apply", "-"], cwd=copy, input=patch.diff,
-                           capture_output=True, text=True)
+            subprocess.run(
+                ["git", "apply", "-"], cwd=copy, input=patch.diff, capture_output=True, text=True
+            )
             tree = ast.parse((copy / item.read_site.file).read_text())
             for node in ast.walk(tree):
                 if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -141,18 +155,24 @@ def test_patched_code_defines_every_name_it_uses(shop, shop_patches):
                     if isinstance(inner, (ast.Import, ast.ImportFrom)):
                         bound |= {a.asname or a.name.split(".")[0] for a in inner.names}
                 used_locals = {
-                    n.id for n in ast.walk(node)
+                    n.id
+                    for n in ast.walk(node)
                     if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
                 }
-                module_level = {
-                    n.id for n in ast.walk(tree)
-                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
-                } | set(dir(builtins)) | {
-                    a.asname or a.name.split(".")[0]
-                    for s in ast.walk(tree)
-                    if isinstance(s, (ast.Import, ast.ImportFrom))
-                    for a in s.names
-                }
+                module_level = (
+                    {
+                        n.id
+                        for n in ast.walk(tree)
+                        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+                    }
+                    | set(dir(builtins))
+                    | {
+                        a.asname or a.name.split(".")[0]
+                        for s in ast.walk(tree)
+                        if isinstance(s, (ast.Import, ast.ImportFrom))
+                        for a in s.names
+                    }
+                )
                 dangling = used_locals - bound - module_level
                 # Anything genuinely global is filtered above; what is left
                 # would raise NameError at runtime.
@@ -165,7 +185,9 @@ def test_patched_code_defines_every_name_it_uses(shop, shop_patches):
 
 def test_oversell_becomes_a_conditional_update(shop_patches):
     item, patch = next(
-        (f, p) for f, p in shop_patches if f.route == "POST /orders" and p.strategy == "atomic_update"
+        (f, p)
+        for f, p in shop_patches
+        if f.route == "POST /orders" and p.strategy == "atomic_update"
     )
     assert "update(Item)" in patch.diff
     assert "Item.stock >= payload.qty" in patch.diff
@@ -173,9 +195,7 @@ def test_oversell_becomes_a_conditional_update(shop_patches):
 
 
 def test_duplicate_insert_ships_its_migration(shop_patches):
-    item, patch = next(
-        (f, p) for f, p in shop_patches if f.pattern == "duplicate_insert"
-    )
+    item, patch = next((f, p) for f, p in shop_patches if f.pattern == "duplicate_insert")
     assert patch.migration is not None
     assert "CREATE UNIQUE INDEX" in patch.migration.statement
     assert any("does NOTHING without the unique index" in n for n in patch.notes)
@@ -186,3 +206,88 @@ def test_multi_row_lock_orders_by_primary_key(shop_patches):
     matches = [p for _, p in shop_patches if p.strategy == "select_for_update" and p.diff]
     assert matches
     assert any("order_by" in p.diff for p in matches)
+
+
+def _run_codemod(command_cls, target, source):
+    import libcst as cst
+    from libcst.codemod import CodemodContext
+
+    module = cst.parse_module(source)
+    return command_cls(CodemodContext(), target).transform_module(module).code
+
+
+def test_serializable_retry_wraps_inside_the_route_decorator():
+    """The retry decorator must be innermost. Stacked above @router.post it
+    wraps the return value while the router keeps serving the unwrapped
+    handler, so the guard would never run on a single request."""
+    from raceguard.patch.codemods.base import PatchTarget
+    from raceguard.patch.codemods.serializable_retry import SerializableRetryCommand
+
+    source = (
+        "from fastapi import APIRouter\n\n"
+        "router = APIRouter()\n\n"
+        '@router.post("/orders")\n'
+        "async def create_order(item_id: int):\n"
+        "    return {}\n"
+    )
+    target = PatchTarget(handler="create_order", read_line=6, write_line=7)
+    out = _run_codemod(SerializableRetryCommand, target, source)
+    ast.parse(out)
+    route = out.index("@router.post")
+    retry = out.index("@retry_on_serialization_failure()")
+    defline = out.index("async def create_order")
+    assert route < retry < defline, "retry decorator must sit under the route decorator"
+
+
+def test_serializable_retry_matches_a_sync_handler():
+    """A sync `def` handler must get a sync wrapper; the async helper's
+    `await fn(...)` would raise TypeError on the first request."""
+    from raceguard.patch.codemods.base import PatchTarget
+    from raceguard.patch.codemods.serializable_retry import SerializableRetryCommand
+
+    source = (
+        "from fastapi import APIRouter\n\n"
+        "router = APIRouter()\n\n"
+        '@router.post("/orders")\n'
+        "def create_order(item_id: int):\n"
+        "    return {}\n"
+    )
+    target = PatchTarget(handler="create_order", read_line=6, write_line=7, is_async=False)
+    out = _run_codemod(SerializableRetryCommand, target, source)
+    ast.parse(out)
+    assert "time.sleep(" in out
+    assert "await fn(" not in out
+    assert "import time" in out
+
+
+def test_emitted_rejection_never_strands_httpexception():
+    """A handler that rejects via JSONResponse never imported HTTPException.
+    A codemod that emits `raise HTTPException(...)` must import it, or the very
+    first rejection is a NameError."""
+    from raceguard.patch.codemods.base import PatchTarget
+    from raceguard.patch.codemods.optimistic_version import OptimisticVersionCommand
+
+    source = (
+        "from fastapi import APIRouter\n\n"
+        "router = APIRouter()\n\n"
+        '@router.put("/prefs")\n'
+        "async def save_prefs(user_id: int, payload: dict, session):\n"
+        "    prefs = await session.get(Prefs, user_id)\n"
+        "    prefs.data = payload\n"
+        "    await session.commit()\n"
+        "    return {}\n"
+    )
+    read_line = source.splitlines().index("    prefs = await session.get(Prefs, user_id)") + 1
+    write_line = source.splitlines().index("    prefs.data = payload") + 1
+    target = PatchTarget(
+        handler="save_prefs",
+        read_line=read_line,
+        write_line=write_line,
+        model="Prefs",
+        column="data",
+        pk_value="user_id",
+    )
+    out = _run_codemod(OptimisticVersionCommand, target, source)
+    ast.parse(out)
+    assert "raise HTTPException" in out
+    assert "import HTTPException" in out  # brought into scope, not left dangling

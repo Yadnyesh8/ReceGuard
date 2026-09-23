@@ -117,9 +117,7 @@ def test_two_phase_reports_both_numbers_separately(context):
     config, run = context
     target = config.target("purchase")
     invariant = derive_for_target(config, target, admin_url=run.admin_url)
-    amplified, natural = asyncio.run(
-        verify_two_phase(run, target, invariant, trials=4)
-    )
+    amplified, natural = asyncio.run(verify_two_phase(run, target, invariant, trials=4))
     assert amplified.amplified
     assert natural is not None
     assert not natural.amplified
@@ -161,9 +159,7 @@ def test_patch_closes_the_race(shop):
             target = config.target("purchase")
             invariant = derive_for_target(config, target, admin_url=run.admin_url)
             verdict = asyncio.run(verify_target(run, target, invariant, trials=8, amplify=True))
-            assert not verdict.violated, (
-                f"the patch did not close the race: {verdict.summary()}"
-            )
+            assert not verdict.violated, f"the patch did not close the race: {verdict.summary()}"
             # Exactly one buyer wins every time now.
             for trial in verdict.trials:
                 if trial.usable:

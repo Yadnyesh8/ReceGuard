@@ -34,7 +34,9 @@ async def _insert_session(session: AsyncSession, user_id: int) -> UserSession:
 async def create_session(user_id: int, session: AsyncSession):
     active_count = (
         await session.execute(
-            select(func.count()).select_from(UserSession).where(
+            select(func.count())
+            .select_from(UserSession)
+            .where(
                 UserSession.user_id == user_id,
                 UserSession.active.is_(True),
             )

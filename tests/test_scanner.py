@@ -145,9 +145,7 @@ def test_guarded_endpoint_is_not_flagged(shop_scan):
 def test_helper_delegation_is_medium_not_high(shop_scan):
     """The teams handler delegates to a helper. The window is real, but the
     link crosses a call boundary, so high confidence would be an overclaim."""
-    finding = next(
-        f for f in shop_scan.findings if f.route == "POST /teams/{team_id}/members"
-    )
+    finding = next(f for f in shop_scan.findings if f.route == "POST /teams/{team_id}/members")
     assert finding.confidence is Confidence.medium
     assert "call boundary" in finding.explanation
 
@@ -161,3 +159,34 @@ def test_min_confidence_filters(shop):
     high = scan([str(shop / "shop")], ScanOptions(min_confidence=Confidence.high, root=shop))
     low = scan([str(shop / "shop")], ScanOptions(min_confidence=Confidence.low, root=shop))
     assert len(high.findings) < len(low.findings)
+
+
+def test_two_handlers_sharing_a_name_are_both_reported(tmp_path):
+    """A name reused for two handlers in one module (or across router files)
+    must not collapse into one finding. Keying the dedupe on the handler name
+    alone dropped the race on the second, the worst failure a race detector
+    has: a real defect reported as absent."""
+    source = (
+        "from fastapi import APIRouter, HTTPException\n"
+        "router = APIRouter()\n\n"
+        '@router.post("/a")\n'
+        "async def handler(item_id: int, qty: int, session):\n"
+        "    item = await session.get(Item, item_id)\n"
+        "    if item.stock < qty:\n"
+        '        raise HTTPException(409, "no")\n'
+        "    item.stock -= qty\n"
+        "    await session.commit()\n"
+        "    return {}\n\n"
+        '@router.post("/b")\n'
+        "async def handler(item_id: int, qty: int, session):\n"
+        "    acct = await session.get(Account, item_id)\n"
+        "    if acct.balance < qty:\n"
+        '        raise HTTPException(409, "no")\n'
+        "    acct.balance -= qty\n"
+        "    await session.commit()\n"
+        "    return {}\n"
+    )
+    (tmp_path / "app.py").write_text(source)
+    result = scan([str(tmp_path)], ScanOptions(min_confidence=Confidence.low, root=tmp_path))
+    routes = sorted(f.route for f in result.findings if f.pattern == "oversell")
+    assert routes == ["POST /a", "POST /b"], f"both handlers must be reported, got {routes}"

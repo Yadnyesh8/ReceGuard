@@ -94,7 +94,9 @@ def validate(
 
     from .. import db
 
-    scratch_name, scratch_url = db.create_trial_database(admin_url, 9_000 + _salt(), template=template)
+    scratch_name, scratch_url = db.create_trial_database(
+        admin_url, 9_000 + _salt(), template=template
+    )
     try:
         # -- step 2: the SQL parses and plans ---------------------------
         try:
@@ -147,9 +149,7 @@ def validate(
             except Exception as exc:  # noqa: BLE001
                 report.passed = False
                 _fail(report, 4, f"could not build the violating state: {exc}")
-            detected, rows = db.check_invariant(
-                scratch_url, invariant.check_sql, invariant.params
-            )
+            detected, rows = db.check_invariant(scratch_url, invariant.check_sql, invariant.params)
             if not detected:
                 report.passed = False
                 _fail(
@@ -187,9 +187,7 @@ def _fail(report: ValidationReport, step: int, message: str) -> NoReturn:
 # --------------------------------------------------------------------------
 
 
-def build_corruption(
-    invariant: Invariant, schema: Schema
-) -> list[tuple[str, dict]] | None:
+def build_corruption(invariant: Invariant, schema: Schema) -> list[tuple[str, dict]] | None:
     """Statements that MUST make ``check_sql`` return at least one row.
 
     Deliberately schema aware. An earlier version used

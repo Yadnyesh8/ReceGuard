@@ -33,8 +33,7 @@ from raceguard.report import text as text_report
 # through by the lookbehind.
 _NEGATION = r"(?<!not )(?<!never )(?<!nor )(?<!n\'t )"
 FORBIDDEN = re.compile(
-    _NEGATION
-    + r"\b(is safe|are safe|secure|verified correct|guaranteed|proven correct|"
+    _NEGATION + r"\b(is safe|are safe|secure|verified correct|guaranteed|proven correct|"
     r"proven safe|race[- ]free|bug[- ]free|no race exists)\b",
     re.IGNORECASE,
 )
@@ -108,9 +107,7 @@ def _scan() -> ScanResult:
 RENDERERS = {
     "text.scan": lambda: text_report.render_scan(_scan(), colour=False),
     "text.verdict": lambda: text_report.render_verdict(_clean_verdict(), colour=False),
-    "text.two_phase": lambda: text_report.render_two_phase(
-        _clean_verdict(), None, colour=False
-    ),
+    "text.two_phase": lambda: text_report.render_two_phase(_clean_verdict(), None, colour=False),
     "text.footer": lambda: text_report.render_footer(False),
     "html": lambda: html_report.render(scan=_scan(), verdicts=[_clean_verdict()]),
     "json": lambda: json_report.render(scan=_scan(), verdicts=[_clean_verdict()]),

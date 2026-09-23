@@ -62,7 +62,9 @@ VALIDATOR_HEADERS = (
     "if_unmodified_since",
     "etag",
 )
-VERSION_COLUMNS = frozenset({"version", "version_id", "etag", "revision", "updated_at", "lock_version"})
+VERSION_COLUMNS = frozenset(
+    {"version", "version_id", "etag", "revision", "updated_at", "lock_version"}
+)
 
 RETRYABLE_NAMES = frozenset(
     {"SerializationFailure", "DeadlockDetected", "OperationalError", "TransactionRollbackError"}
@@ -262,7 +264,11 @@ def _lookup_then_act(node: cst.FunctionDef) -> bool:
     if not (has_lookup and has_branch and has_store):
         return False
     lookup_at = min(
-        (lowered.find(t) for t in ("select(", ".get(", ".scalar(", "query(") if lowered.find(t) >= 0),
+        (
+            lowered.find(t)
+            for t in ("select(", ".get(", ".scalar(", "query(")
+            if lowered.find(t) >= 0
+        ),
         default=-1,
     )
     store_at = max(lowered.rfind("session.add"), lowered.rfind("insert("))
@@ -311,9 +317,19 @@ def _accepts_full_body(node: cst.FunctionDef) -> bool:
             continue
         name = dotted(annotation.annotation)
         tail = name.rsplit(".", 1)[-1]
-        if tail and tail[0].isupper() and tail not in {
-            "AsyncSession", "Session", "Request", "Response", "UUID", "Decimal",
-        }:
+        if (
+            tail
+            and tail[0].isupper()
+            and tail
+            not in {
+                "AsyncSession",
+                "Session",
+                "Request",
+                "Response",
+                "UUID",
+                "Decimal",
+            }
+        ):
             return True
     return False
 
@@ -330,9 +346,11 @@ def _retry_rules(node: cst.FunctionDef, positions, file: str, route: str, lines)
             source = cst.Module(body=[loop]).code
             lowered = source.lower()
             is_forever = isinstance(loop.test, cst.Name) and loop.test.value == "True"
-            retries = "except" in lowered and any(
-                code.lower() in lowered for code in RETRYABLE_CODES
-            ) or bool(RETRYABLE_NAMES & _names(loop))
+            retries = (
+                "except" in lowered
+                and any(code.lower() in lowered for code in RETRYABLE_CODES)
+                or bool(RETRYABLE_NAMES & _names(loop))
+            )
             if not retries:
                 return
             bounded = not is_forever or any(
@@ -349,9 +367,7 @@ def _retry_rules(node: cst.FunctionDef, positions, file: str, route: str, lines)
                 return
             statements = list(handler.body.body)
             body = cst.Module(body=statements).code.lower()  # type: ignore[arg-type]
-            reissues = any(
-                t in body for t in ("retry", "continue", "raise", "again", "rollback")
-            )
+            reissues = any(t in body for t in ("retry", "continue", "raise", "again", "rollback"))
             if not reissues:
                 collected.append(("swallowed_serialization_failure", handler))
 

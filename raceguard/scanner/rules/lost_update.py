@@ -35,7 +35,12 @@ def detect(ctx: RuleContext) -> list[Finding]:
                 continue
             if not linked(read, write, ctx.analysis):
                 continue
-            if write.guards & {"atomic_expression", "with_for_update", "raw_for_update", "version_check"}:
+            if write.guards & {
+                "atomic_expression",
+                "with_for_update",
+                "raw_for_update",
+                "version_check",
+            }:
                 continue
             decision = decision_between(read, write, ctx.analysis)
             # A threshold decision is oversell's territory, not this rule's.

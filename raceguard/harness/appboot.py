@@ -263,8 +263,15 @@ def _built_image(
             hint="app.dockerfile is relative to the directory holding raceguard.yaml",
         )
     command = [
-        "docker", "build", "-f", str(path), "-t", tag,
-        "--label", f"raceguard.run={run_id}", str(context_dir),
+        "docker",
+        "build",
+        "-f",
+        str(path),
+        "-t",
+        tag,
+        "--label",
+        f"raceguard.run={run_id}",
+        str(context_dir),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=900)
     if result.returncode != 0:
@@ -338,23 +345,38 @@ async def boot_container(
         # port and rewriting the database host works on both.
         container_url = _reachable_from_container(database_url)
         command = [
-            "docker", "run", "--rm", "-d",
-            "--name", container_name,
-            "--label", f"raceguard.run={run_id}",
-            "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges",
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "--name",
+            container_name,
+            "--label",
+            f"raceguard.run={run_id}",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
             "--read-only",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-            "--memory", "1g",
-            "--cpus", "2",
-            "-p", f"{port}:{port}",
-            "--add-host", "host.docker.internal:host-gateway",
-            "-e", f"{database_url_env}={container_url}",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=64m",
+            "--memory",
+            "1g",
+            "--cpus",
+            "2",
+            "-p",
+            f"{port}:{port}",
+            "--add-host",
+            "host.docker.internal:host-gateway",
+            "-e",
+            f"{database_url_env}={container_url}",
         ]
         if shim_dir is not None:
             command += [
-                "-v", f"{shim_dir}:/rgshim:ro",
-                "-e", "PYTHONPATH=/rgshim",
+                "-v",
+                f"{shim_dir}:/rgshim:ro",
+                "-e",
+                "PYTHONPATH=/rgshim",
             ]
         for key, value in (env or {}).items():
             command += ["-e", f"{key}={value}"]

@@ -24,9 +24,7 @@ app = FastAPI()
 
 
 @app.post("/products/{product_id}/reviews")
-async def create_review(
-    product_id: int, user_id: int, rating: int, session: AsyncSession
-):
+async def create_review(product_id: int, user_id: int, rating: int, session: AsyncSession):
     existing = (
         await session.execute(
             select(PendingReview).where(

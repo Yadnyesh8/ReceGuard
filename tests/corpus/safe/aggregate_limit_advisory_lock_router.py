@@ -25,12 +25,12 @@ MAX_ACTIVE_SESSIONS = 3
 
 @router.post("/sessions")
 async def create_session_locked(user_id: int, session: AsyncSession):
-    await session.execute(
-        text("SELECT pg_advisory_xact_lock(:key)"), {"key": user_id}
-    )
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": user_id})
     active_count = (
         await session.execute(
-            select(func.count()).select_from(UserSession).where(
+            select(func.count())
+            .select_from(UserSession)
+            .where(
                 UserSession.user_id == user_id,
                 UserSession.active.is_(True),
             )

@@ -37,9 +37,7 @@ def wilson_interval(successes: int, total: int, z: float = Z95) -> tuple[float, 
     z2 = z * z
     denominator = 1 + z2 / total
     centre = (p + z2 / (2 * total)) / denominator
-    margin = (z / denominator) * math.sqrt(
-        (p * (1 - p) / total) + (z2 / (4 * total * total))
-    )
+    margin = (z / denominator) * math.sqrt((p * (1 - p) / total) + (z2 / (4 * total * total)))
     return (round(max(0.0, centre - margin), 4), round(min(1.0, centre + margin), 4))
 
 
@@ -74,9 +72,7 @@ def summarise(trials: Sequence[TrialRecord]) -> TrialStats:
             f"the application crashed is not a pass"
         )
     if usable == 0 and total:
-        notes.append(
-            "no trial produced a usable response, so this run measured nothing"
-        )
+        notes.append("no trial produced a usable response, so this run measured nothing")
     return TrialStats(
         total=total,
         usable=usable,

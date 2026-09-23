@@ -154,6 +154,12 @@ class Governor:
         self.external_target = external_target
 
         self._semaphore = asyncio.Semaphore(max_global_concurrency)
+        # Multi-slot acquisition is serialised so two concurrent targets can
+        # never each grab a partial set of slots and then wait on each other:
+        # the classic lock-ordering deadlock. The release path deliberately
+        # does NOT take this lock, so slots always keep coming back while an
+        # acquirer waits under it.
+        self._acquire_lock = asyncio.Lock()
         self._bucket = TokenBucket(burst_capacity, refill_per_second)
         self._last_trial_end = 0.0
         self.stats = GovernorStats()
@@ -199,19 +205,35 @@ class Governor:
                 hint="raise governor.max_requests_per_run, or verify fewer targets per run",
             )
 
-    async def acquire(self, n: int = 1) -> None:
-        """Take ``n`` slots from the global ceiling and ``n`` tokens."""
+    async def acquire(self, n: int = 1) -> int:
+        """Reserve capacity for a burst of ``n`` requests. Returns slots taken.
+
+        The global ceiling bounds how many requests are in flight at once
+        ACROSS targets; it is not a cap on the burst within one trial, because
+        the burst is the whole mechanism of discovery. Firing ``n`` larger than
+        the ceiling is therefore legitimate and must not deadlock: at most
+        ``max_global_concurrency`` slots are taken however large ``n`` is. The
+        token bucket still meters the full ``n`` so sustained rate stays
+        bounded even when a single burst exceeds the ceiling.
+
+        The number returned is what ``release`` must be given back; never pass
+        ``release`` the original ``n``.
+        """
         if self.stopped_reason:
             raise GovernorRefusal(f"governor has stopped this run: {self.stopped_reason}")
-        for _ in range(n):
-            await self._semaphore.acquire()
+        slots = min(n, self.max_global_concurrency)
+        async with self._acquire_lock:
+            for _ in range(slots):
+                await self._semaphore.acquire()
         waited = await self._bucket.take(float(n))
         if waited:
             self.stats.pauses += 1
             self.stats.paused_s += waited
+        return slots
 
     def release(self, n: int = 1) -> None:
-        for _ in range(n):
+        """Give back the slots ``acquire`` reported taking (not the burst size)."""
+        for _ in range(min(n, self.max_global_concurrency)):
             self._semaphore.release()
 
     async def before_trial(self) -> None:

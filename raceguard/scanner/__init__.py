@@ -207,8 +207,12 @@ class ModuleFactVisitor(cst.CSTVisitor):
 
 
 _RETRY_CODES = ("40001", "40P01")
-_RETRY_EXCEPTIONS = ("SerializationFailure", "DeadlockDetected", "OperationalError",
-                     "TransactionRollbackError")
+_RETRY_EXCEPTIONS = (
+    "SerializationFailure",
+    "DeadlockDetected",
+    "OperationalError",
+    "TransactionRollbackError",
+)
 
 
 def _contains_retry(node: cst.FunctionDef) -> bool:
@@ -221,9 +225,7 @@ def _contains_retry(node: cst.FunctionDef) -> bool:
     )
     if not catches:
         return False
-    reissues = any(
-        token in source for token in ("continue", "retry", "attempt", "for ", "while ")
-    )
+    reissues = any(token in source for token in ("continue", "retry", "attempt", "for ", "while "))
     backs_off = True  # bounded-ness is a hygiene finding, not a guard question
     return reissues and backs_off
 
@@ -335,9 +337,7 @@ def scan(
             file_findings = cached
         else:
             try:
-                file_findings = _scan_source(
-                    source, path, root, external_prefixes, global_models
-                )
+                file_findings = _scan_source(source, path, root, external_prefixes, global_models)
             except cst.ParserSyntaxError as exc:
                 errors.append(f"{path}: could not parse: {exc}")
                 continue
@@ -410,9 +410,7 @@ def _scan_source(
     for handler in collector.handlers:
         if not handler.routes:
             continue
-        analysis = analyze_handler(
-            handler.node, positions, facts.local_functions, helper_bodies
-        )
+        analysis = analyze_handler(handler.node, positions, facts.local_functions, helper_bodies)
         _promote_helper_writes(analysis, facts)
 
         if facts.serializable:
@@ -487,9 +485,7 @@ def _decorator_base(dec: cst.Decorator) -> str:
     return ""
 
 
-def _collect_helper_bodies(
-    tree: cst.Module, handler_names: set[str]
-) -> dict[str, cst.FunctionDef]:
+def _collect_helper_bodies(tree: cst.Module, handler_names: set[str]) -> dict[str, cst.FunctionDef]:
     """Module level functions that are not themselves routes."""
     bodies: dict[str, cst.FunctionDef] = {}
     for statement in tree.body:
@@ -582,10 +578,24 @@ def _suppression_for(
 
 
 def _dedupe(findings: list[Finding]) -> list[Finding]:
-    """One finding per (file, qualname, pattern); keep the highest confidence."""
-    best: dict[tuple[str, str, str], Finding] = {}
+    """One finding per physical handler and pattern; keep the highest confidence.
+
+    The read site's line is part of the key, not just the qualname. Two
+    handlers in one module can share a name (``async def handler`` on both
+    ``/a`` and ``/b``, or a name reused across router files), and keying on the
+    name alone silently collapses them into one, dropping a real race on the
+    second. The read line pins the finding to a specific handler while still
+    collapsing the same handler reported by more than one matcher, which lands
+    on the same read.
+    """
+    best: dict[tuple[str, str, str, int], Finding] = {}
     for finding in findings:
-        key = (finding.read_site.file, finding.handler, finding.pattern)
+        key = (
+            finding.read_site.file,
+            finding.handler,
+            finding.pattern,
+            finding.read_site.start_line,
+        )
         current = best.get(key)
         if current is None or finding.confidence.rank() > current.confidence.rank():
             best[key] = finding

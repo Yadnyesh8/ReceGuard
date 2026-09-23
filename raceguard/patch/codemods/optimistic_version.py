@@ -33,6 +33,9 @@ class OptimisticVersionCommand(StrategyCommand):
             )
             return super().leave_FunctionDef(original, updated)
         self.add_import("sqlalchemy", "update")
+        # There is no decision branch to reuse in a blind overwrite, so the
+        # emitted 409 must bring its own name into scope.
+        self.ensure_rejection_import()
         version = target.version_column
         seen = f"seen_{version}"
 
@@ -50,13 +53,11 @@ class OptimisticVersionCommand(StrategyCommand):
             f"if result.rowcount == 0:\n"
             f"    # Somebody else wrote this row after we read it. Use 412 instead\n"
             f"    # of 409 if the caller sent If-Match; it is the same check.\n"
-            f"    raise HTTPException(status_code=409, detail=\"stale version\")\n"
+            f'    raise HTTPException(status_code=409, detail="stale version")\n'
         )
         self.notes.append(
             f"add {seen} to the request model and set the other columns you intend "
             f"to write inside the same .values() call"
         )
-        updated = self.splice(
-            updated, replacement, start=located.write, end=located.write + 1
-        )
+        updated = self.splice(updated, replacement, start=located.write, end=located.write + 1)
         return super().leave_FunctionDef(original, updated)

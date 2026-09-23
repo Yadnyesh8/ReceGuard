@@ -80,8 +80,7 @@ class AtomicUpdateCommand(StrategyCommand):
             f"    .values({target.column}={target.model}.{target.column} - {target.amount})\n"
             f")\n"
             f"if result.rowcount == 0:\n"
-            f"{rejection}\n"
-            + refresh
+            f"{rejection}\n" + refresh
         )
         self.notes.append(
             "rowcount 0 now carries the rejection: the comparison happens inside the "

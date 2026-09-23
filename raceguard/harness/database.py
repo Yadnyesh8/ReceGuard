@@ -149,5 +149,3 @@ def _ensure_extensions(url: str, extensions: tuple[str, ...]) -> None:
     with connect(url, autocommit=True) as conn:
         for name in extensions:
             conn.execute(f"CREATE EXTENSION IF NOT EXISTS {quote_ident(name)}")
-
-

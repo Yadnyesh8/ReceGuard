@@ -27,9 +27,7 @@ app = FastAPI()
 
 
 async def _load_item_locked(session: AsyncSession, item_id: int) -> Item | None:
-    result = await session.execute(
-        select(Item).where(Item.id == item_id).with_for_update()
-    )
+    result = await session.execute(select(Item).where(Item.id == item_id).with_for_update())
     return result.scalar_one_or_none()
 
 

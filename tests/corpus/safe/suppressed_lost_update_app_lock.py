@@ -39,6 +39,8 @@ async def deposit_app_lock(account_id: int, amount: float, session: AsyncSession
         if account is None:
             raise HTTPException(404, "no such account")
         current = account.balance
-        account.balance = current + amount  # raceguard: ignore[lost_update] guarded by per-account threading.Lock, single-process deployment only
+        account.balance = (
+            current + amount
+        )  # raceguard: ignore[lost_update] guarded by per-account threading.Lock, single-process deployment only
         await session.commit()
         return {"balance": account.balance}

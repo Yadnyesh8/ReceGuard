@@ -22,9 +22,7 @@ router = APIRouter(prefix="/api/v1")
 
 @router.post("/orders-locked")
 async def create_order_locked(item_id: int, qty: int, session: AsyncSession):
-    result = await session.execute(
-        select(Item).where(Item.id == item_id).with_for_update()
-    )
+    result = await session.execute(select(Item).where(Item.id == item_id).with_for_update())
     item = result.scalar_one_or_none()
     if item is None:
         raise HTTPException(404, "no such item")

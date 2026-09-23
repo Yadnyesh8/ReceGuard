@@ -89,9 +89,7 @@ class AppConfig(BaseModel):
     @model_validator(mode="after")
     def _need_a_boot_path(self) -> AppConfig:
         if not self.module and not self.start and not self.dockerfile:
-            raise ValueError(
-                "app needs at least one of module (inprocess), start, or dockerfile"
-            )
+            raise ValueError("app needs at least one of module (inprocess), start, or dockerfile")
         return self
 
 
@@ -287,9 +285,7 @@ class Config(BaseModel):
             if t.id == target_id:
                 return t
         known = ", ".join(t.id for t in self.targets) or "(none defined)"
-        raise ConfigError(
-            f"no target with id {target_id!r}", hint=f"known targets: {known}"
-        )
+        raise ConfigError(f"no target with id {target_id!r}", hint=f"known targets: {known}")
 
     def resolved(self, target: Target) -> dict[str, Any]:
         """Merge target overrides over defaults into one flat settings dict."""

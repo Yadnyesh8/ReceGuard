@@ -78,7 +78,11 @@ class CriticVerdict:
         if not self.ran:
             return "critic did not run (no model configured)"
         if self.sound:
-            return f"critic found no counterexample: {self.note}" if self.note else "critic found no counterexample"
+            return (
+                f"critic found no counterexample: {self.note}"
+                if self.note
+                else "critic found no counterexample"
+            )
         return f"critic rejected the candidate: {self.note}"
 
 

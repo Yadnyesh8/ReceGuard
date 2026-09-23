@@ -89,11 +89,9 @@ class RuleContext:
         guard_partial: str | None = None,
     ) -> Finding:
         used_models = models if models is not None else (read.models or write.models)
-        tables = self.tables_for(used_models) or [
-            m.lower() for m in used_models
-        ]
+        tables = self.tables_for(used_models) or [m.lower() for m in used_models]
         return Finding(
-            id=Finding.make_id(self.file, self.handler.qualname, pattern),
+            id=Finding.make_id(self.file, self.handler.qualname, pattern, read.line),
             handler=self.handler.qualname,
             route=self.route,
             pattern=pattern,
@@ -156,9 +154,7 @@ def linked(read: Site, write: Write, analysis: HandlerAnalysis) -> bool:
     return False
 
 
-def decision_between(
-    read: Site, write: Write, analysis: HandlerAnalysis
-) -> Decision | None:
+def decision_between(read: Site, write: Write, analysis: HandlerAnalysis) -> Decision | None:
     """The decision on the path: after the read, before the write, same taint."""
     best: Decision | None = None
     for decision in analysis.decisions:
@@ -207,7 +203,9 @@ def base_confidence(
     return confidence, why
 
 
-def _base_confidence(ctx: RuleContext, read: Site, write: Write, decision) -> tuple[Confidence, str]:
+def _base_confidence(
+    ctx: RuleContext, read: Site, write: Write, decision
+) -> tuple[Confidence, str]:
     if ctx.analysis.dynamic_sql:
         return (
             Confidence.low,

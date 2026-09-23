@@ -24,9 +24,7 @@ app = FastAPI()
 
 
 @app.post("/transfers")
-async def transfer_funds(
-    from_id: int, to_id: int, amount: float, session: AsyncSession
-):
+async def transfer_funds(from_id: int, to_id: int, amount: float, session: AsyncSession):
     sender = (
         await session.execute(select(Account).where(Account.id == from_id))
     ).scalar_one_or_none()

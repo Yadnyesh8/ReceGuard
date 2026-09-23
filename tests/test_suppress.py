@@ -60,14 +60,21 @@ def test_config_suppression_by_handler():
         reason="single admin caller, serialised upstream",
         handler="app/routes/admin.py::bulk_import",
     )
-    assert rule.matches(rule="oversell", file="app/routes/admin.py", handler="app.routes.admin:bulk_import")
-    assert not rule.matches(rule="oversell", file="app/routes/orders.py", handler="app.routes.orders:create")
-    assert not rule.matches(rule="lost_update", file="app/routes/admin.py", handler="app.routes.admin:bulk_import")
+    assert rule.matches(
+        rule="oversell", file="app/routes/admin.py", handler="app.routes.admin:bulk_import"
+    )
+    assert not rule.matches(
+        rule="oversell", file="app/routes/orders.py", handler="app.routes.orders:create"
+    )
+    assert not rule.matches(
+        rule="lost_update", file="app/routes/admin.py", handler="app.routes.admin:bulk_import"
+    )
 
 
 def test_config_suppression_by_file():
-    rule = ConfigSuppression(rule="*", reason="legacy module, scheduled for deletion",
-                             file="app/legacy.py")
+    rule = ConfigSuppression(
+        rule="*", reason="legacy module, scheduled for deletion", file="app/legacy.py"
+    )
     assert rule.matches(rule="oversell", file="app/legacy.py", handler="x:y")
 
 

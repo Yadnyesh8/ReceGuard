@@ -44,9 +44,7 @@ async def create_order_claim_first(
 
     order = (
         await session.execute(
-            select(IdempotentOrder).where(
-                IdempotentOrder.idempotency_key == idempotency_key
-            )
+            select(IdempotentOrder).where(IdempotentOrder.idempotency_key == idempotency_key)
         )
     ).scalar_one()
     return {"order_id": order.id, "status": order.status}

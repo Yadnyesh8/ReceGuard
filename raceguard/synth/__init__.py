@@ -116,7 +116,9 @@ def derive(
             schema,
             tables or list(schema.tables),
             settings=config.synth,
-            decision_snippet=(finding.decision_site.snippet if finding and finding.decision_site else ""),
+            decision_snippet=(
+                finding.decision_site.snippet if finding and finding.decision_site else ""
+            ),
         )
         if proposed is not None:
             candidates.append(("spec", proposed.invariant))
@@ -177,9 +179,7 @@ def derive(
         strict=strict and admin_url is not None,
     )
     if not report.passed:
-        raise InvariantRejected(
-            f"invariant failed the validation gate:\n{report.render()}", step=0
-        )
+        raise InvariantRejected(f"invariant failed the validation gate:\n{report.render()}", step=0)
     return invariant
 
 

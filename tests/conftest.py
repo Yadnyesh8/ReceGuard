@@ -41,13 +41,9 @@ def docker_available() -> bool:
     import subprocess
 
     try:
-        return subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=20
-        ).returncode == 0
+        return subprocess.run(["docker", "info"], capture_output=True, timeout=20).returncode == 0
     except Exception:
         return False
 
 
-requires_docker = pytest.mark.skipif(
-    not docker_available(), reason="needs a running Docker daemon"
-)
+requires_docker = pytest.mark.skipif(not docker_available(), reason="needs a running Docker daemon")

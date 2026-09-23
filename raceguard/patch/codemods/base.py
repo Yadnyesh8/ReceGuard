@@ -31,10 +31,10 @@ class PatchTarget:
     column: str = "stock"
     key_columns: Sequence[str] = ()
     pk: str = "id"
-    pk_value: str = "item_id"       # the expression the handler already uses
-    amount: str = "qty"             # the quantity subtracted or compared
+    pk_value: str = "item_id"  # the expression the handler already uses
+    amount: str = "qty"  # the quantity subtracted or compared
     version_column: str = "version"
-    lock_key: str = '"raceguard"'   # a SQL-quotable expression
+    lock_key: str = '"raceguard"'  # a SQL-quotable expression
     multi_row: bool = False
     is_async: bool = True
     session: str = "session"
@@ -51,7 +51,7 @@ class Located:
     read: int | None = None
     decision: int | None = None
     write: int | None = None
-    read_target: str | None = None   # the name the read was assigned to
+    read_target: str | None = None  # the name the read was assigned to
     write_target: str | None = None  # the name the constructed row was bound to
     write_kwargs: dict[str, str] = field(default_factory=dict)
     rejection: list[str] = field(default_factory=list)
@@ -127,8 +127,10 @@ class StrategyCommand(VisitorBasedCodemodCommand):
 
     # -- emission helpers ------------------------------------------------
 
-    def add_import(self, module: str, name: str) -> None:
-        AddImportsVisitor.add_needed_import(self.context, module, name)
+    def add_import(self, module: str, name: str | None = None) -> None:
+        # obj=None imports the bare module (`import asyncio`); an empty string
+        # would make AddImportsVisitor emit `from asyncio import ` and crash.
+        AddImportsVisitor.add_needed_import(self.context, module, name or None)
 
     @property
     def await_kw(self) -> str:
@@ -146,7 +148,22 @@ class StrategyCommand(VisitorBasedCodemodCommand):
             "the original rejection branch could not be reused verbatim, so a "
             f"{status} is emitted; review it against the behaviour you want"
         )
+        self.ensure_rejection_import()
         return f'    raise HTTPException(status_code={status}, detail="{detail}")'
+
+    def ensure_rejection_import(self) -> None:
+        """Make an emitted `raise HTTPException(...)` actually resolve.
+
+        A handler that rejects via JSONResponse never imported HTTPException,
+        and a diff that raises NameError on its first rejection is the exact
+        defect this module exists to avoid. The starlette class is the right
+        one for both frameworks: FastAPI's HTTPException subclasses it and
+        FastAPI registers its handler against the starlette class.
+        """
+        module = getattr(self.context, "module", None)
+        code = module.code if module is not None else ""
+        if "HTTPException" not in code:
+            self.add_import("starlette.exceptions", "HTTPException")
 
     def splice(
         self,
@@ -208,9 +225,7 @@ class StrategyCommand(VisitorBasedCodemodCommand):
         return name in _referenced_names(body[index:])
 
     def bail(self, reason: str) -> None:
-        self.notes.append(
-            f"{reason}; nothing is proposed rather than something approximate"
-        )
+        self.notes.append(f"{reason}; nothing is proposed rather than something approximate")
 
 
 def _model_kwargs(statement: cst.CSTNode, model: str) -> dict[str, str]:
@@ -239,22 +254,50 @@ def _model_kwargs(statement: cst.CSTNode, model: str) -> dict[str, str]:
 def _bound_names(statements: Sequence[cst.CSTNode]) -> set[str]:
     names: set[str] = set()
     for statement in statements:
+
         class _V(cst.CSTVisitor):
             def visit_AssignTarget(self, node: cst.AssignTarget) -> None:
-                if isinstance(node.target, cst.Name):
-                    names.add(node.target.value)
+                _add_target(node.target, names)
 
             def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
-                if isinstance(node.target, cst.Name):
-                    names.add(node.target.value)
+                _add_target(node.target, names)
+
+            def visit_NamedExpr(self, node: cst.NamedExpr) -> None:
+                # `if (item := get(...)).stock < q:` binds `item`. The liveness
+                # guard must see this, or a splice that removes the walrus while
+                # the name is still used below emits a NameError patch.
+                _add_target(node.target, names)
+
+            def visit_For(self, node: cst.For) -> None:
+                _add_target(node.target, names)
+
+            def visit_CompFor(self, node: cst.CompFor) -> None:
+                _add_target(node.target, names)
+
+            def visit_AsName(self, node: cst.AsName) -> None:
+                # `with x() as item:` and `except E as item:` both bind here.
+                if isinstance(node.name, cst.Name):
+                    names.add(node.name.value)
 
         statement.visit(_V())
     return names
 
 
+def _add_target(target: cst.BaseExpression, names: set[str]) -> None:
+    """Collect every simple name a binding target introduces, tuples included."""
+    if isinstance(target, cst.Name):
+        names.add(target.value)
+    elif isinstance(target, (cst.Tuple, cst.List)):
+        for element in target.elements:
+            _add_target(element.value, names)
+    elif isinstance(target, cst.StarredElement):
+        _add_target(target.value, names)
+
+
 def _referenced_names(statements: Sequence[cst.CSTNode]) -> set[str]:
     names: set[str] = set()
     for statement in statements:
+
         class _V(cst.CSTVisitor):
             def visit_Name(self, node: cst.Name) -> None:
                 names.add(node.value)
@@ -277,11 +320,21 @@ def _assigned_name(statement: cst.CSTNode) -> str | None:
 
 
 def _branch_body(statement: cst.CSTNode) -> list[str]:
-    """The lines inside `if ...:` so the emitted guard can reuse them."""
+    """The lines inside `if ...:` so the emitted guard can reuse them.
+
+    Dedented as a BLOCK, not stripped line by line: per-line stripping
+    flattens a nested compound statement inside the branch into lines that no
+    longer parse, and the whole codemod then degrades to "no diff" for a
+    handler it could have fixed.
+    """
     if not isinstance(statement, cst.If):
         return []
     rendered = cst.Module(body=[]).code_for_node(statement.body)
-    return [line.strip() for line in rendered.splitlines() if line.strip()]
+    lines = [line for line in rendered.splitlines() if line.strip()]
+    if not lines:
+        return []
+    margin = min(len(line) - len(line.lstrip()) for line in lines)
+    return [line[margin:] for line in lines]
 
 
 def is_call_to(node: cst.CSTNode, *names: str) -> bool:

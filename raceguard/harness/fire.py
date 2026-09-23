@@ -149,16 +149,22 @@ async def fire_last_byte(
                 "Connection": "close",
                 **request.headers,
             }
-            head = f"{request.method} {request.path} HTTP/1.1\r\n" + "".join(
-                f"{k}: {v}\r\n" for k, v in headers.items()
-            ) + "\r\n"
+            head = (
+                f"{request.method} {request.path} HTTP/1.1\r\n"
+                + "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+                + "\r\n"
+            )
             raw = head.encode() + body
-            reader, writer = await asyncio.open_connection(host, port, ssl=context)
+            # Bounded: a wedged server that accepts nothing must fail this
+            # trial, not hang the whole verify run inside connect or drain.
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port, ssl=context), timeout=timeout_s
+            )
             _disable_nagle(writer)
             # Everything but the last byte. The server will not begin
             # processing a request it does not consider complete.
             writer.write(raw[:-1])
-            await writer.drain()
+            await asyncio.wait_for(writer.drain(), timeout=timeout_s)
             connections.append((reader, writer, raw[-1:]))
 
         await asyncio.sleep(pause_s)  # let the bulk land
@@ -167,7 +173,9 @@ async def fire_last_byte(
         for _, writer, tail in connections:
             writer.write(tail)
             released.append(time.perf_counter())
-        await asyncio.gather(*(w.drain() for _, w, _ in connections))
+        await asyncio.wait_for(
+            asyncio.gather(*(w.drain() for _, w, _ in connections)), timeout=timeout_s
+        )
         if len(released) > 1:
             result.arrival_spread_ms = (max(released) - min(released)) * 1000
 
@@ -187,6 +195,18 @@ async def fire_last_byte(
     finally:
         for _, writer, _ in connections:
             writer.close()
+        # Best effort; an unclosed transport only warns, a hang here would
+        # cost a whole trial.
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *(w.wait_closed() for _, w, _ in connections),
+                    return_exceptions=True,
+                ),
+                timeout=5.0,
+            )
+        except TimeoutError:
+            pass
     result.duration_s = time.perf_counter() - started
     return result
 

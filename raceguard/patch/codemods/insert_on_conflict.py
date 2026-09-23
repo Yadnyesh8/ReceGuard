@@ -37,9 +37,7 @@ class InsertOnConflictCommand(StrategyCommand):
         # The reported write is usually `session.add(user)`, which carries
         # neither the values nor the bound name. The construction that feeds it
         # is the statement holding both, so look for that first.
-        constructed_name, constructed_kwargs = self.find_model_construction(
-            original, target.model
-        )
+        constructed_name, constructed_kwargs = self.find_model_construction(original, target.model)
         kwargs = located.write_kwargs or constructed_kwargs
         if kwargs:
             values = ", ".join(f"{k}={v}" for k, v in kwargs.items())
@@ -64,7 +62,10 @@ class InsertOnConflictCommand(StrategyCommand):
             f"if {name} is None:\n"
             f"    # Another request created this row between the lookup and here.\n"
             f"    # The constraint, not the lookup, is what makes that safe.\n"
-            f"    raise HTTPException(status_code=409, detail=\"already exists\")\n"
+            # The handler's own rejection branch, when one was located, so the
+            # response shape does not change under the patch.
+            + self.rejection_or_default(409, "already exists")
+            + "\n"
         )
         self.notes.append(
             f"this change does NOTHING without the unique index on "

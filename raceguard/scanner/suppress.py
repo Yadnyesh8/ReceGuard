@@ -39,7 +39,9 @@ class InlineSuppression:
         return WILDCARD in self.rules or rule in self.rules
 
 
-def parse_inline(source: str, *, strict: bool = True) -> tuple[dict[int, InlineSuppression], list[str]]:
+def parse_inline(
+    source: str, *, strict: bool = True
+) -> tuple[dict[int, InlineSuppression], list[str]]:
     """Scan raw source text for suppression comments. Returns (by line, problems)."""
     found: dict[int, InlineSuppression] = {}
     problems: list[str] = []
@@ -47,9 +49,7 @@ def parse_inline(source: str, *, strict: bool = True) -> tuple[dict[int, InlineS
         match = SUPPRESS_RE.search(text)
         if match is None:
             continue
-        rules = frozenset(
-            part.strip() for part in match.group("rules").split(",") if part.strip()
-        )
+        rules = frozenset(part.strip() for part in match.group("rules").split(",") if part.strip())
         reason = match.group("reason").strip()
         if not rules:
             problems.append(
@@ -64,9 +64,7 @@ def parse_inline(source: str, *, strict: bool = True) -> tuple[dict[int, InlineS
             )
             if strict:
                 continue
-        found[number] = InlineSuppression(
-            line=number, rules=rules, reason=reason, raw=text.strip()
-        )
+        found[number] = InlineSuppression(line=number, rules=rules, reason=reason, raw=text.strip())
     return found, problems
 
 

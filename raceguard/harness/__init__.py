@@ -56,9 +56,7 @@ class RunContext:
             return self.app_image
         if not self.config.app.dockerfile:
             return None
-        self.app_image = build_app_image(
-            self.config.app.dockerfile, self.config.root, self.run_id
-        )
+        self.app_image = build_app_image(self.config.app.dockerfile, self.config.root, self.run_id)
         return self.app_image
 
     def cleanup(self) -> None:
@@ -80,30 +78,42 @@ def start_run(config: Config, *, run_id: str | None = None) -> RunContext:
         extensions=tuple(config.database.extensions),
     )
 
-    governor = Governor(
-        max_global_concurrency=config.governor.max_global_concurrency,
-        min_trial_spacing_ms=config.governor.min_trial_spacing_ms,
-        max_requests_per_run=config.governor.max_requests_per_run,
-        respect_rate_limit_headers=config.governor.respect_rate_limit_headers,
-        refill_per_second=config.governor.refill_per_second,
-        burst_capacity=config.governor.burst_capacity,
-        external_target=config.governor.allow_external_target,
-        external_concurrency_ceiling=config.governor.external_concurrency_ceiling,
-    )
-    Governor.check_target_ownership(
-        container.url, allow_external=config.governor.allow_external_target,
-        confirmed_host=_hostname(container.url),
-    )
+    # Everything after the container is up must run under a guard that stops
+    # it on failure. An ownership refusal or a broken migrate command would
+    # otherwise raise before `context` exists, and the caller's
+    # `finally: context.cleanup()` never runs, orphaning a live PostgreSQL
+    # container on every invocation.
+    try:
+        governor = Governor(
+            max_global_concurrency=config.governor.max_global_concurrency,
+            min_trial_spacing_ms=config.governor.min_trial_spacing_ms,
+            max_requests_per_run=config.governor.max_requests_per_run,
+            respect_rate_limit_headers=config.governor.respect_rate_limit_headers,
+            refill_per_second=config.governor.refill_per_second,
+            burst_capacity=config.governor.burst_capacity,
+            external_target=config.governor.allow_external_target,
+            external_concurrency_ceiling=config.governor.external_concurrency_ceiling,
+        )
+        Governor.check_target_ownership(
+            container.url,
+            allow_external=config.governor.allow_external_target,
+            confirmed_host=_hostname(container.url),
+        )
 
-    template_url = db.create_template(
-        container.url,
-        migrate_command=config.app.migrate,
-        cwd=str(config.root),
-        database_url_env=config.app.database_url_env,
-        env=config.app.env,
-        template=config.database.template_name,
-        driver=config.app.database_url_driver,
-    )
+        template_url = db.create_template(
+            container.url,
+            migrate_command=config.app.migrate,
+            cwd=str(config.root),
+            database_url_env=config.app.database_url_env,
+            env=config.app.env,
+            template=config.database.template_name,
+            driver=config.app.database_url_driver,
+        )
+    except BaseException:
+        with suppress(Exception):
+            container.stop()
+        raise
+
     context = RunContext(
         config=config,
         run_id=run_id,
@@ -168,7 +178,7 @@ async def run_trial(
         amplify_table = target.amplify_table or invariant.table
 
         await context.governor.before_trial()
-        await context.governor.acquire(concurrency)
+        slots = await context.governor.acquire(concurrency)
         try:
             context.governor.note_request(concurrency)
             result = await _fire_against_app(
@@ -184,7 +194,7 @@ async def run_trial(
                 timeout_s=timeout_s,
             )
         finally:
-            context.governor.release(concurrency)
+            context.governor.release(slots)
             context.governor.after_trial()
 
         record.status_codes = result.status_codes
@@ -326,7 +336,9 @@ def _requests_for(target: Target, concurrency: int) -> list[Request]:
     ]
 
 
-_TABLE_IN_SQL = re.compile(r"\b(?:FROM|JOIN|INTO|UPDATE)\s+\"?([A-Za-z_][A-Za-z0-9_]*)\"?", re.IGNORECASE)
+_TABLE_IN_SQL = re.compile(
+    r"\b(?:FROM|JOIN|INTO|UPDATE)\s+\"?([A-Za-z_][A-Za-z0-9_]*)\"?", re.IGNORECASE
+)
 
 
 def _tables(target: Target, invariant: Invariant) -> list[str]:

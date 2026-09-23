@@ -19,7 +19,7 @@ from .base import StrategyCommand
 
 DESCRIPTION = "Wrap the transaction in a bounded retry for serialization failures."
 
-RETRY_HELPER = '''\
+RETRY_HELPER_ASYNC = '''\
 def retry_on_serialization_failure(max_attempts: int = 5, base_delay: float = 0.05):
     """Retry a transaction that PostgreSQL aborted for a serialization failure.
 
@@ -55,6 +55,45 @@ def retry_on_serialization_failure(max_attempts: int = 5, base_delay: float = 0.
     return decorator
 '''
 
+# The sync twin. Emitting the async helper onto a `def` handler produces
+# `await fn(...)` on a plain function, which raises TypeError on the first
+# request instead of retrying anything.
+RETRY_HELPER_SYNC = '''\
+def retry_on_serialization_failure(max_attempts: int = 5, base_delay: float = 0.05):
+    """Retry a transaction that PostgreSQL aborted for a serialization failure.
+
+    Bounded, exponential, jittered, and it re-raises once the cap is reached.
+    The whole transaction is re-issued, decision logic included: retrying only
+    the write would replay a decision made against a snapshot that no longer
+    exists.
+
+    40001 serialization_failure, 40P01 deadlock_detected.
+    """
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            last: Exception | None = None
+            for attempt in range(max_attempts):
+                try:
+                    return fn(*args, **kwargs)
+                except DBAPIError as exc:
+                    code = getattr(getattr(exc, "orig", None), "sqlstate", None) or getattr(
+                        getattr(exc, "orig", None), "pgcode", None
+                    )
+                    if code not in ("40001", "40P01"):
+                        raise
+                    last = exc
+                    if attempt == max_attempts - 1:
+                        break
+                    delay = base_delay * (2**attempt)
+                    time.sleep(delay + random.uniform(0, delay))
+            raise last
+        return wrapper
+
+    return decorator
+'''
+
 
 class SerializableRetryCommand(StrategyCommand):
     DESCRIPTION = DESCRIPTION
@@ -62,12 +101,15 @@ class SerializableRetryCommand(StrategyCommand):
     def leave_Module(self, original: cst.Module, updated: cst.Module) -> cst.Module:
         if self.changed:
             return updated
-        self.add_import("asyncio", "")
-        self.add_import("functools", "")
-        self.add_import("random", "")
+        if self.target.is_async:
+            self.add_import("asyncio")
+        else:
+            self.add_import("time")
+        self.add_import("functools")
+        self.add_import("random")
         self.add_import("sqlalchemy.exc", "DBAPIError")
 
-        helper = cst.parse_module(RETRY_HELPER)
+        helper = cst.parse_module(RETRY_HELPER_ASYNC if self.target.is_async else RETRY_HELPER_SYNC)
         body = list(updated.body)
         insert_at = 0
         for index, statement in enumerate(body):
@@ -82,9 +124,7 @@ class SerializableRetryCommand(StrategyCommand):
             "SERIALIZABLE without a retry wrapper converts silent data corruption "
             "into user visible 500s; the wrapper is what completes the guard"
         )
-        return updated.with_changes(
-            body=body[:insert_at] + list(helper.body) + body[insert_at:]
-        )
+        return updated.with_changes(body=body[:insert_at] + list(helper.body) + body[insert_at:])
 
     def leave_FunctionDef(self, original, updated):
         if original.name.value != self.target.handler:
@@ -92,5 +132,10 @@ class SerializableRetryCommand(StrategyCommand):
         decorator = cst.Decorator(
             decorator=cst.parse_expression("retry_on_serialization_failure()")
         )
-        updated = updated.with_changes(decorators=[decorator, *updated.decorators])
+        # Innermost, i.e. LAST in the list. `@router.post(...)` registers the
+        # function it receives and returns it unchanged; a retry wrapper
+        # stacked above the route decorator wraps the return value while the
+        # router keeps serving the unwrapped handler, so the guard would never
+        # execute on a single request.
+        updated = updated.with_changes(decorators=[*updated.decorators, decorator])
         return super().leave_FunctionDef(original, updated)

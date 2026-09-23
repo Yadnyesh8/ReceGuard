@@ -50,9 +50,7 @@ def check_constraint(table: str, column: str, *, minimum: int = 0) -> Migration:
             f'ALTER TABLE "{table}" VALIDATE CONSTRAINT "{name}";'
         ),
         alembic=(
-            f"op.create_check_constraint(\n"
-            f"    {name!r}, {table!r}, {f'{column} >= {minimum}'!r}\n"
-            f")"
+            f"op.create_check_constraint(\n    {name!r}, {table!r}, {f'{column} >= {minimum}'!r}\n)"
         ),
     )
 

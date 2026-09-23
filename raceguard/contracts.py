@@ -108,9 +108,26 @@ class Finding(BaseModel):
     suppressed: bool = False
     suppression_reason: str | None = None
 
+    @property
+    def fingerprint(self) -> str:
+        """The baseline key: stable across line shifts, distinct across handlers.
+
+        ``id`` includes the read line so two same-named handlers never collide,
+        but that makes it wrong for a baseline: editing a line above the handler
+        changes the id and resurrects a finding somebody already accepted. The
+        fingerprint drops the line and adds the route instead, which is what
+        tells two same-named handlers apart without moving when the file does.
+        """
+        key = f"{self.read_site.file}|{self.handler}|{self.pattern}|{self.route or ''}"
+        return hashlib.sha1(key.encode()).hexdigest()[:16]
+
     @staticmethod
-    def make_id(file: str, qualname: str, pattern: str) -> str:
-        return hashlib.sha1(f"{file}|{qualname}|{pattern}".encode()).hexdigest()[:12]
+    def make_id(file: str, qualname: str, pattern: str, read_line: int = 0) -> str:
+        # read_line disambiguates two handlers that share a qualname (a name
+        # reused in one module or across router files). Without it their ids
+        # collide, and a colliding id means suppressing one suppresses both and
+        # GitHub code scanning dedupes two real findings into one.
+        return hashlib.sha1(f"{file}|{qualname}|{pattern}|{read_line}".encode()).hexdigest()[:12]
 
 
 class ScanResult(BaseModel):

@@ -44,7 +44,9 @@ def retry_on_serialization_failure(max_attempts: int = 3):
                     if pgcode == SERIALIZATION_FAILURE and attempt < max_attempts - 1:
                         continue
                     raise
+
         return wrapper
+
     return decorator
 
 

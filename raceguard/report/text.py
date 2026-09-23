@@ -56,13 +56,19 @@ def render_scan(result: ScanResult, *, colour: bool = True, show_suppressed: boo
             f"({result.duration_s:.2f}s)."
         )
         lines.append(
-            c("  This means nothing matched the recognised patterns, not that the "
-              "code is free of races.", DIM)
+            c(
+                "  This means nothing matched the recognised patterns, not that the "
+                "code is free of races.",
+                DIM,
+            )
         )
     else:
         lines.append(
-            c(f"{len(result.findings)} finding(s) in {result.files_scanned} file(s) "
-              f"({result.duration_s:.2f}s)", BOLD)
+            c(
+                f"{len(result.findings)} finding(s) in {result.files_scanned} file(s) "
+                f"({result.duration_s:.2f}s)",
+                BOLD,
+            )
         )
         lines.append("")
 
@@ -128,9 +134,7 @@ def _render_hygiene(item: HygieneFinding, c: Palette) -> list[str]:
 def render_verdict(verdict: Verdict, *, colour: bool = True) -> str:
     c = Palette(colour)
     lines: list[str] = []
-    status = (
-        c("VIOLATED", RED) if verdict.violated else c("not reproduced", GREEN)
-    )
+    status = c("VIOLATED", RED) if verdict.violated else c("not reproduced", GREEN)
     lines.append(c(f"target {verdict.target_id}", BOLD) + f"  {status}")
     lines.append(f"  invariant   {verdict.invariant.kind}: {verdict.invariant.predicate}")
     lines.append(f"  derivation  {_wrap(verdict.invariant.derivation, 14)}")
@@ -159,9 +163,7 @@ def render_verdict(verdict: Verdict, *, colour: bool = True) -> str:
     return "\n".join(lines)
 
 
-def render_two_phase(
-    amplified: Verdict, natural: Verdict | None, *, colour: bool = True
-) -> str:
+def render_two_phase(amplified: Verdict, natural: Verdict | None, *, colour: bool = True) -> str:
     """Amplified and natural are reported separately, never merged.
 
     The amplified number is the structural claim: this window exists and can be
@@ -169,14 +171,20 @@ def render_two_phase(
     fired unaided. One blended figure would be a different, and false, claim.
     """
     c = Palette(colour)
-    parts = [c("amplified phase (does the window exist?)", BOLD), render_verdict(amplified, colour=colour)]
+    parts = [
+        c("amplified phase (does the window exist?)", BOLD),
+        render_verdict(amplified, colour=colour),
+    ]
     if natural is not None:
         parts.append(c("natural phase (how often does it fire unaided?)", BOLD))
         parts.append(render_verdict(natural, colour=colour))
     else:
         parts.append(
-            c("natural phase skipped: the amplified phase found no violation, so "
-              "there is no window to measure the unaided rate of.", DIM)
+            c(
+                "natural phase skipped: the amplified phase found no violation, so "
+                "there is no window to measure the unaided rate of.",
+                DIM,
+            )
         )
     return "\n".join(parts)
 

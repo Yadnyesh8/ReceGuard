@@ -41,9 +41,10 @@ def test_unknown_schema_version_is_refused(tmp_path):
 
 
 def test_duplicate_target_ids_are_refused(tmp_path):
-    payload = {**MINIMAL, "targets": [
-        {"id": "a", "route": "POST /x"}, {"id": "a", "route": "POST /y"}
-    ]}
+    payload = {
+        **MINIMAL,
+        "targets": [{"id": "a", "route": "POST /x"}, {"id": "a", "route": "POST /y"}],
+    }
     with pytest.raises(ConfigError) as excinfo:
         load_config(write(tmp_path, payload))
     assert "duplicate target id" in excinfo.value.message
@@ -131,6 +132,8 @@ def test_shop_config_round_trips(shop):
 
 
 def test_pinned_by_digest_detection():
-    assert not Config(app={"module": "m:a"}, database={"image": "postgres:17"}).database.pinned_by_digest
+    assert not Config(
+        app={"module": "m:a"}, database={"image": "postgres:17"}
+    ).database.pinned_by_digest
     pinned = Config(app={"module": "m:a"}, database={"image": "postgres:17@sha256:abc"})
     assert pinned.database.pinned_by_digest

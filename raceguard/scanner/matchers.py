@@ -261,7 +261,9 @@ FULL_GUARDS = frozenset(
     }
 )
 
-_VERSION_COLUMNS = frozenset({"version", "version_id", "updated_at", "etag", "revision", "lock_version"})
+_VERSION_COLUMNS = frozenset(
+    {"version", "version_id", "updated_at", "etag", "revision", "lock_version"}
+)
 
 
 def guards_on_call(call: cst.Call) -> set[str]:
@@ -331,7 +333,9 @@ def _version_predicate(call: cst.Call) -> bool:
     """``.where(Item.id == id, Item.version == seen)`` is an optimistic guard."""
     for inner in [call, *_collect_calls(call)]:
         func = inner.func
-        if not (isinstance(func, cst.Attribute) and func.attr.value in {"where", "filter", "filter_by"}):
+        if not (
+            isinstance(func, cst.Attribute) and func.attr.value in {"where", "filter", "filter_by"}
+        ):
             continue
         for arg in inner.args:
             if arg.keyword is not None and arg.keyword.value in _VERSION_COLUMNS:

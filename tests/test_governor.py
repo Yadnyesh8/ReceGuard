@@ -93,16 +93,12 @@ async def test_backpressure_stops_the_run():
 
 
 def test_ephemeral_targets_are_allowed():
-    Governor.check_target_ownership(
-        "postgresql://localhost:55432/rg_trial_1", allow_external=False
-    )
+    Governor.check_target_ownership("postgresql://localhost:55432/rg_trial_1", allow_external=False)
 
 
 def test_external_target_is_refused_by_default():
     with pytest.raises(GovernorRefusal) as excinfo:
-        Governor.check_target_ownership(
-            "postgresql://staging.internal/app", allow_external=False
-        )
+        Governor.check_target_ownership("postgresql://staging.internal/app", allow_external=False)
     assert "not an ephemeral container" in excinfo.value.message
 
 
@@ -123,3 +119,31 @@ def test_external_target_requires_typing_the_host():
 def test_external_target_lowers_the_ceiling():
     governor = Governor(max_global_concurrency=32, external_target=True)
     assert governor.max_global_concurrency == 4
+
+
+async def test_burst_larger_than_ceiling_does_not_deadlock():
+    """A burst wider than the global ceiling is legitimate: the burst is the
+    discovery mechanism, and the token bucket, not the semaphore, bounds the
+    sustained rate. Capping slots at the ceiling is what keeps acquire(n) with
+    n > ceiling from blocking forever on a slot that can never come free."""
+    governor = make(max_global_concurrency=4, refill_per_second=1000, burst_capacity=1000)
+    slots = await asyncio.wait_for(governor.acquire(30), timeout=2.0)
+    assert slots == 4
+    governor.release(slots)
+    assert governor._semaphore._value == 4  # fully restored, no leak
+
+
+async def test_concurrent_oversized_bursts_all_complete():
+    """Two targets each bursting above the ceiling must not lock-order deadlock
+    against each other; every burst completes and the semaphore rebalances."""
+    governor = make(max_global_concurrency=8, refill_per_second=1000, burst_capacity=1000)
+
+    async def burst() -> int:
+        slots = await governor.acquire(20)
+        await asyncio.sleep(0.01)
+        governor.release(slots)
+        return slots
+
+    got = await asyncio.wait_for(asyncio.gather(*(burst() for _ in range(4))), timeout=5.0)
+    assert got == [8, 8, 8, 8]
+    assert governor._semaphore._value == 8

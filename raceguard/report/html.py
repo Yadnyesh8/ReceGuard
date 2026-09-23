@@ -71,9 +71,7 @@ def render(
     ]
 
     if scan is not None:
-        parts.append(
-            f"<h2>Findings ({len(scan.findings)} in {scan.files_scanned} files)</h2>"
-        )
+        parts.append(f"<h2>Findings ({len(scan.findings)} in {scan.files_scanned} files)</h2>")
         if not scan.findings:
             parts.append(
                 "<p class='sub'>Nothing matched the recognised patterns. That is not "
@@ -124,7 +122,11 @@ def _finding_card(finding) -> str:
             else ""
         )
         + f"<dt>write</dt><dd><code>line {finding.write_site.start_line}</code></dd>"
-        + (f"<dt>tables</dt><dd>{html.escape(', '.join(finding.tables))}</dd>" if finding.tables else "")
+        + (
+            f"<dt>tables</dt><dd>{html.escape(', '.join(finding.tables))}</dd>"
+            if finding.tables
+            else ""
+        )
         + (
             f"<dt>partial guard</dt><dd>{html.escape(finding.guard_partial)}</dd>"
             if finding.guard_partial

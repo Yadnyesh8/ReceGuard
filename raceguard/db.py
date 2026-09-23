@@ -205,7 +205,9 @@ def _assert_template_idle(admin_url: str, template: str) -> None:
         )
 
 
-def create_trial_database(admin_url: str, index: int, *, template: str = TEMPLATE_DB) -> tuple[str, str]:
+def create_trial_database(
+    admin_url: str, index: int, *, template: str = TEMPLATE_DB
+) -> tuple[str, str]:
     """CREATE DATABASE rg_trial_n TEMPLATE rg_template.
 
     Template copy is dramatically faster than re-running migrations and,
@@ -214,10 +216,22 @@ def create_trial_database(admin_url: str, index: int, *, template: str = TEMPLAT
     """
     name = f"rg_trial_{index}_{uuid.uuid4().hex[:6]}"
     with connect(admin_url, autocommit=True) as conn:
-        conn.execute(
-            f"CREATE DATABASE {quote_ident(name)} TEMPLATE {quote_ident(template)}"
-        )
+        conn.execute(f"CREATE DATABASE {quote_ident(name)} TEMPLATE {quote_ident(template)}")
     return name, with_database(admin_url, name)
+
+
+def apply_ddl(url: str, statement: str) -> None:
+    """Run one migration statement against a database, in autocommit.
+
+    Used to bring the reverify template up to the schema a patch requires
+    before its trials clone from it. Autocommit is mandatory: a patch migration
+    can carry ``CREATE UNIQUE INDEX CONCURRENTLY``, which PostgreSQL refuses to
+    run inside a transaction block.
+    """
+    if not statement or not statement.strip():
+        return
+    with connect(url, autocommit=True) as conn:
+        conn.execute(statement)
 
 
 def drop_trial_database(admin_url: str, name: str) -> None:

@@ -34,12 +34,12 @@ async def add_team_member_queued(team_id: int, user_id: int, session: AsyncSessi
         raise HTTPException(404, "no such team")
     count = (
         await session.execute(
-            select(func.count()).select_from(TeamMember).where(
-                TeamMember.team_id == team_id
-            )
+            select(func.count()).select_from(TeamMember).where(TeamMember.team_id == team_id)
         )
     ).scalar_one()
-    if count >= team.member_limit:  # raceguard: ignore[aggregate_limit] this handler only runs behind a per-team single-consumer queue, so concurrent invocations for one team never overlap
+    if (
+        count >= team.member_limit
+    ):  # raceguard: ignore[aggregate_limit] this handler only runs behind a per-team single-consumer queue, so concurrent invocations for one team never overlap
         raise HTTPException(409, "team is full")
     session.add(TeamMember(team_id=team_id, user_id=user_id))
     await session.commit()

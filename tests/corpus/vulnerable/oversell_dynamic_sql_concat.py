@@ -35,8 +35,14 @@ async def create_order_dynamic(item_id: int, qty: int, session: AsyncSession):
     table = "items"
     column = "stock"
     write_sql = (
-        "UPDATE " + table + " SET " + column + " = " + str(stock - qty) +
-        " WHERE id = " + str(item_id)
+        "UPDATE "
+        + table
+        + " SET "
+        + column
+        + " = "
+        + str(stock - qty)
+        + " WHERE id = "
+        + str(item_id)
     )
     await session.execute(text(write_sql))
     await session.commit()

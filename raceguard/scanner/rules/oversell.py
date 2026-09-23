@@ -65,8 +65,7 @@ def detect(ctx: RuleContext) -> list[Finding]:
                     guard_partial=partial,
                     explanation=(
                         f"{column or 'a counter'} is read, compared against a "
-                        f"threshold, then written back in the same handler; "
-                        + why
+                        f"threshold, then written back in the same handler; " + why
                     ),
                     columns=[column] if column else None,
                 )

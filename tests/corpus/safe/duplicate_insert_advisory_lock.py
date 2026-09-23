@@ -24,9 +24,7 @@ app = FastAPI()
 
 @app.post("/signups-locked")
 async def create_signup_locked(email: str, session: AsyncSession):
-    await session.execute(
-        text("SELECT pg_advisory_xact_lock(hashtext(:email))"), {"email": email}
-    )
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:email))"), {"email": email})
     existing = (
         await session.execute(select(Signup).where(Signup.email == email))
     ).scalar_one_or_none()

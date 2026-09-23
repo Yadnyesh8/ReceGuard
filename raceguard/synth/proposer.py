@@ -67,11 +67,30 @@ DECISION SITE
 # Keyword readings, used when no model is configured. Deliberately conservative.
 _KEYWORDS: list[tuple[re.Pattern[str], InvariantKind]] = [
     (re.compile(r"\bnever\b.*\b(below|under|negative|less than zero)\b", re.I), "non_negative"),
-    (re.compile(r"\b(oversell|out of stock|insufficient|overdraw|overdraft)\b", re.I), "non_negative"),
-    (re.compile(r"\b(total|sum|conserv|balance).{0,40}\b(unchanged|constant|preserved|must not change)\b", re.I), "conservation"),
+    (
+        re.compile(r"\b(oversell|out of stock|insufficient|overdraw|overdraft)\b", re.I),
+        "non_negative",
+    ),
+    (
+        re.compile(
+            r"\b(total|sum|conserv|balance).{0,40}\b(unchanged|constant|preserved|must not change)\b",
+            re.I,
+        ),
+        "conservation",
+    ),
     (re.compile(r"\b(transfer|move).{0,30}\bbetween\b", re.I), "conservation"),
-    (re.compile(r"\b(at most once|only once|exactly once|single use|one time|redeemed once)\b", re.I), "single_use"),
-    (re.compile(r"\b(only be registered once|unique|no duplicate|already exists|create if)\b", re.I), "duplicate_insert"),
+    (
+        re.compile(
+            r"\b(at most once|only once|exactly once|single use|one time|redeemed once)\b", re.I
+        ),
+        "single_use",
+    ),
+    (
+        re.compile(
+            r"\b(only be registered once|unique|no duplicate|already exists|create if)\b", re.I
+        ),
+        "duplicate_insert",
+    ),
     (re.compile(r"\b(at most|no more than|maximum of|up to)\s+\w+\s+\w+", re.I), "aggregate_limit"),
 ]
 
@@ -127,8 +146,7 @@ def check_sql_for(
             raise ValueError(f"{kind} needs at least one key column")
         key_sql = ", ".join(quote_ident(k) for k in keys)
         return (
-            f"SELECT {key_sql}, COUNT(*) AS n FROM {t} "
-            f"GROUP BY {key_sql} HAVING COUNT(*) > 1",
+            f"SELECT {key_sql}, COUNT(*) AS n FROM {t} GROUP BY {key_sql} HAVING COUNT(*) > 1",
             {},
             f"at most one {table} row per ({', '.join(keys)})",
         )
@@ -142,8 +160,7 @@ def check_sql_for(
             # The cap lives in a column on another row, the usual shape for
             # "at most teams.max_members members per team".
             return (
-                f"SELECT {g}, COUNT(*) AS n FROM {t} GROUP BY {g} "
-                f"HAVING COUNT(*) > %(limit)s",
+                f"SELECT {g}, COUNT(*) AS n FROM {t} GROUP BY {g} HAVING COUNT(*) > %(limit)s",
                 {"limit": limit if limit is not None else 1},
                 f"at most {limit} {table} rows per {group}",
             )
@@ -239,8 +256,16 @@ def _keyword_candidate(spec: str, schema: Schema, tables: list[str]) -> Candidat
 
 def _extract_limit(spec: str) -> int | None:
     words = {
-        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
     }
     match = re.search(r"\b(?:at most|no more than|maximum of|up to)\s+(\w+)", spec, re.I)
     if not match:

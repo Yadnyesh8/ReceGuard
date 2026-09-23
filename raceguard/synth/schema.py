@@ -18,8 +18,19 @@ from dataclasses import dataclass, field
 
 NUMERIC_TYPES = frozenset(
     {
-        "smallint", "integer", "bigint", "decimal", "numeric", "real",
-        "double precision", "money", "int2", "int4", "int8", "float4", "float8",
+        "smallint",
+        "integer",
+        "bigint",
+        "decimal",
+        "numeric",
+        "real",
+        "double precision",
+        "money",
+        "int2",
+        "int4",
+        "int8",
+        "float4",
+        "float8",
     }
 )
 

@@ -190,9 +190,7 @@ class Review(Base):
     product_id = Column(Integer, nullable=False)
     rating = Column(Integer, nullable=False)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "product_id", name="uq_review_user_product"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "product_id", name="uq_review_user_product"),)
 
 
 class UserSession(Base):

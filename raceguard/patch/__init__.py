@@ -62,7 +62,9 @@ def build_target(finding: Finding, invariant: Invariant | None) -> PatchTarget:
     blob = "\n".join([read, decision, write])
 
     model = _first_model(finding, blob)
-    column = finding.columns[0] if finding.columns else (invariant.column if invariant else "amount")
+    column = (
+        finding.columns[0] if finding.columns else (invariant.column if invariant else "amount")
+    )
     pk_value = _match(_PK_HINT, read) or _match(_WHERE_PK, read)
     if pk_value is None:
         # Try the columns this finding is actually about before giving up.
@@ -76,7 +78,9 @@ def build_target(finding: Finding, invariant: Invariant | None) -> PatchTarget:
     session = _match(_SESSION, blob) or "session"
     handler_name = finding.handler.rsplit(":", 1)[-1].rsplit(".", 1)[-1]
 
-    key_columns = list(finding.columns) or ([invariant.column] if invariant and invariant.column else [])
+    key_columns = list(finding.columns) or (
+        [invariant.column] if invariant and invariant.column else []
+    )
     group = (finding.columns[0] if finding.columns else None) or "key"
     lock_key = f'"{invariant.table if invariant else model.lower()}:{group}:" + str({pk_value})'
 
@@ -101,7 +105,15 @@ def build_target(finding: Finding, invariant: Invariant | None) -> PatchTarget:
 def _first_model(finding: Finding, blob: str) -> str:
     for match in re.finditer(r"\b([A-Z][A-Za-z0-9_]+)\b", blob):
         name = match.group(1)
-        if name not in {"HTTPException", "Depends", "AsyncSession", "Session", "None", "True", "False"}:
+        if name not in {
+            "HTTPException",
+            "Depends",
+            "AsyncSession",
+            "Session",
+            "None",
+            "True",
+            "False",
+        }:
             return name
     if finding.tables:
         return "".join(part.capitalize() for part in finding.tables[0].rstrip("s").split("_"))
@@ -116,7 +128,9 @@ def _match(pattern: re.Pattern[str], text: str) -> str | None:
 # --------------------------------------------------------------------------
 
 
-def migration_for(decision: Decision, target: PatchTarget, invariant: Invariant | None) -> Migration | None:
+def migration_for(
+    decision: Decision, target: PatchTarget, invariant: Invariant | None
+) -> Migration | None:
     if not decision.needs_migration:
         return None
     table = invariant.table if invariant else target.model.lower() + "s"
@@ -142,9 +156,7 @@ def propose(
 
     source_path = root / finding.read_site.file
     if not source_path.is_file():
-        raise ConfigError(
-            f"cannot patch {finding.read_site.file}: file not found under {root}"
-        )
+        raise ConfigError(f"cannot patch {finding.read_site.file}: file not found under {root}")
     original = source_path.read_text(encoding="utf-8")
 
     command_class = COMMANDS[decision.strategy]
@@ -201,9 +213,7 @@ class ApplyResult:
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, timeout=120
-    )
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=120)
 
 
 def require_clean_tree(root: Path) -> None:
@@ -218,14 +228,11 @@ def require_clean_tree(root: Path) -> None:
     # changes" makes --apply refuse to run because of something the tool did
     # one second earlier.
     dirty = [
-        line
-        for line in status.stdout.splitlines()
-        if line.strip() and ".raceguard/" not in line
+        line for line in status.stdout.splitlines() if line.strip() and ".raceguard/" not in line
     ]
     if dirty:
         raise UsageError(
-            "the working tree has uncommitted changes:\n  "
-            + "\n  ".join(dirty[:10]),
+            "the working tree has uncommitted changes:\n  " + "\n  ".join(dirty[:10]),
             hint=(
                 "commit or stash first. --apply reverifies and runs your tests, and "
                 "it must be able to discard its own change without touching yours."
@@ -272,7 +279,11 @@ def apply_patch(
         # 2. apply the diff.
         applied = subprocess.run(
             ["git", "apply", "--verbose", "-"],
-            cwd=root, input=patch.diff, capture_output=True, text=True, timeout=60,
+            cwd=root,
+            input=patch.diff,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if applied.returncode != 0:
             return ApplyResult(
@@ -289,10 +300,7 @@ def apply_patch(
             return ApplyResult(
                 ok=False,
                 failed_step="reverify",
-                output=(
-                    f"the change was discarded because verification could not "
-                    f"complete: {exc}"
-                ),
+                output=(f"the change was discarded because verification could not complete: {exc}"),
                 patch=patch,
             )
         if not result.ok:
@@ -313,10 +321,27 @@ def _verify_and_keep(
 ) -> ApplyResult:
     """Steps 3 to 6. Never restores; the caller owns that."""
 
-    # 3. the migration, when the strategy needs one. The report says plainly
-    #    that the code change alone is insufficient.
+    # 3. the migration, when the strategy needs one. It is applied to the
+    #    reverify template by the reverifier (see cli._make_reverifier) so the
+    #    patched code is tested against the schema it references; reverify would
+    #    otherwise error on a missing index or column and discard a good fix.
+    #    The report still tells the user plainly that the code change alone is
+    #    insufficient and the migration must ship with it.
     if patch.migration is not None:
-        log.info("strategy %s requires a schema change", patch.strategy)
+        if reverify is None:
+            return ApplyResult(
+                ok=False,
+                failed_step="migration",
+                output=(
+                    f"strategy {patch.strategy} requires the schema change below, but "
+                    f"there is no target to reverify against, so it cannot be applied "
+                    f"and tested safely:\n{patch.migration.statement}"
+                ),
+                patch=patch,
+            )
+        log.info(
+            "strategy %s requires a schema change; applied to reverify template", patch.strategy
+        )
 
     # 4. reverify: expect zero violations in T of T trials, amplified.
     if reverify is not None and target is not None:
@@ -339,7 +364,11 @@ def _verify_and_keep(
     if run_tests and config.app.test_command:
         tests = subprocess.run(
             config.app.test_command,
-            shell=True, cwd=root, capture_output=True, text=True, timeout=1800,
+            shell=True,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=1800,
         )
         patch.test_suite_passed = tests.returncode == 0
         if tests.returncode != 0:
@@ -365,6 +394,18 @@ def _restore(root: Path, backup: Path) -> None:
         ["git", "checkout", "--", "."], cwd=root, capture_output=True, text=True
     )
     if reverted.returncode == 0:
+        # checkout reverts tracked files but not files the diff CREATED; those
+        # are left untracked. require_clean_tree guaranteed the tree carried no
+        # untracked files (bar .raceguard/) before the apply, so anything
+        # untracked now was introduced by the patch and must go too, or a
+        # discarded patch leaves a stray new file behind. .raceguard/ holds the
+        # run's own artifacts and is preserved.
+        subprocess.run(
+            ["git", "clean", "-fdq", "-e", ".raceguard"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
         return
     log.warning("git checkout could not restore %s; falling back to the copy", root)
     for source in backup.rglob("*"):

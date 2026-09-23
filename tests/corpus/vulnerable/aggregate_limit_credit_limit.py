@@ -26,9 +26,7 @@ app = FastAPI()
 @app.post("/charges")
 async def create_charge(user_id: int, amount: float, session: AsyncSession):
     credit = (
-        await session.execute(
-            select(CreditAccount).where(CreditAccount.user_id == user_id)
-        )
+        await session.execute(select(CreditAccount).where(CreditAccount.user_id == user_id))
     ).scalar_one_or_none()
     if credit is None:
         raise HTTPException(404, "no such credit account")

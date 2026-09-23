@@ -23,18 +23,14 @@ app = FastAPI()
 
 @app.post("/teams/{team_id}/members")
 async def add_team_member(team_id: int, user_id: int, session: AsyncSession):
-    await session.execute(
-        text("SELECT pg_advisory_xact_lock(:key)"), {"key": team_id}
-    )
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": team_id})
 
     team = await session.get(Team, team_id)
     if team is None:
         raise HTTPException(404, "no such team")
     count = (
         await session.execute(
-            select(func.count()).select_from(TeamMember).where(
-                TeamMember.team_id == team_id
-            )
+            select(func.count()).select_from(TeamMember).where(TeamMember.team_id == team_id)
         )
     ).scalar_one()
     if count >= team.member_limit:

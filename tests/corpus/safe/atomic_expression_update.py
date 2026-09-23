@@ -30,16 +30,12 @@ app = FastAPI()
 
 @app.post("/orders/atomic")
 async def create_order_atomic(item_id: int, qty: int, session: AsyncSession):
-    item = (
-        await session.execute(select(Item).where(Item.id == item_id))
-    ).scalar_one_or_none()
+    item = (await session.execute(select(Item).where(Item.id == item_id))).scalar_one_or_none()
     if item is None:
         raise HTTPException(404, "no such item")
 
     result = await session.execute(
-        update(Item)
-        .where(Item.id == item_id, Item.stock >= qty)
-        .values(stock=Item.stock - qty)
+        update(Item).where(Item.id == item_id, Item.stock >= qty).values(stock=Item.stock - qty)
     )
     await session.commit()
     if result.rowcount == 0:

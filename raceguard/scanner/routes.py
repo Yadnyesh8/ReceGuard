@@ -16,9 +16,7 @@ from dataclasses import dataclass, field
 import libcst as cst
 import libcst.matchers as m
 
-HTTP_METHODS = frozenset(
-    {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
-)
+HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "options", "trace"})
 MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 # Objects a route decorator can hang off. ``api_route`` and ``websocket`` are
@@ -316,7 +314,9 @@ def compose_route(
         if unresolved_routers and route.router in unresolved_routers:
             return None
         if external_prefixes:
-            key = f"{collector.module_name}.{route.router}" if collector.module_name else route.router
+            key = (
+                f"{collector.module_name}.{route.router}" if collector.module_name else route.router
+            )
             outer = external_prefixes.get(key, external_prefixes.get(route.router))
             if outer:
                 prefix = outer.rstrip("/") + prefix

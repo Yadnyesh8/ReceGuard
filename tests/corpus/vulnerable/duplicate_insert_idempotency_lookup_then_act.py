@@ -29,9 +29,7 @@ async def create_order_idempotent(
     user_id: int, idempotency_key: str, total: float, session: AsyncSession
 ):
     existing = (
-        await session.execute(
-            select(Order).where(Order.idempotency_key == idempotency_key)
-        )
+        await session.execute(select(Order).where(Order.idempotency_key == idempotency_key))
     ).scalar_one_or_none()
     if existing is not None:
         return {"order_id": existing.id, "status": existing.status, "created": False}

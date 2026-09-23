@@ -79,21 +79,24 @@ def generate_config(root: Path) -> str:
     app_module = _guess_app_module(files, root)
 
     lines: list[str] = [HEADER, "version: 1", "", "app:"]
-    lines.append(f'  module: "{app_module or "yourapp.main:app"}"'
-                 + ("" if app_module else "   # TODO: could not resolve this statically"))
-    lines.append('  start: "uvicorn %s --host 0.0.0.0 --port 8000"'
-                 % (app_module or "yourapp.main:app"))
+    lines.append(
+        f'  module: "{app_module or "yourapp.main:app"}"'
+        + ("" if app_module else "   # TODO: could not resolve this statically")
+    )
+    lines.append(
+        '  start: "uvicorn %s --host 0.0.0.0 --port 8000"' % (app_module or "yourapp.main:app")
+    )
     lines.append('  health_path: "/health"           # TODO: confirm this endpoint exists')
     lines.append('  base_url: "http://localhost:8000"')
     lines.append('  database_url_env: "DATABASE_URL"')
-    lines.append('  # The driver your app expects in its URL. RaceGuard does not guess:')
-    lines.append('  # an async app handed a sync URL fails at import with a useless error.')
+    lines.append("  # The driver your app expects in its URL. RaceGuard does not guess:")
+    lines.append("  # an async app handed a sync URL fails at import with a useless error.")
     lines.append('  database_url_driver: "asyncpg"   # or "psycopg", or remove for sync')
     lines.append('  migrate: "alembic upgrade head"  # TODO: confirm your migration command')
     lines.append('  test_command: "pytest -q"')
     lines.append("")
     lines.append("database:")
-    lines.append('  # Pin by digest before you rely on these numbers. A moved tag can')
+    lines.append("  # Pin by digest before you rely on these numbers. A moved tag can")
     lines.append("  # silently change verification results.")
     lines.append('  image: "postgres:17-alpine"')
     lines.append("")
@@ -127,9 +130,9 @@ def generate_config(root: Path) -> str:
     lines.append("  enabled: true")
     lines.append("")
     lines.append("suppress: []")
-    lines.append("  # - handler: \"app/routes/admin.py::bulk_import\"")
+    lines.append('  # - handler: "app/routes/admin.py::bulk_import"')
     lines.append("  #   rule: oversell")
-    lines.append("  #   reason: \"single admin caller, serialised upstream by the import queue\"")
+    lines.append('  #   reason: "single admin caller, serialised upstream by the import queue"')
     lines.append("")
     return "\n".join(lines)
 
@@ -164,7 +167,9 @@ def _target_block(
 
     payload = _payload_for(finding, schemas, root)
     lines.append(f"    payload: {_inline(payload)}   # TODO: confirm these values")
-    lines.append('    # headers: { Authorization: "Bearer ${RG_TEST_TOKEN}" }   # TODO if authenticated')
+    lines.append(
+        '    # headers: { Authorization: "Bearer ${RG_TEST_TOKEN}" }   # TODO if authenticated'
+    )
 
     if model is not None:
         lines.append("    seed:")
@@ -229,9 +234,7 @@ def _unique(base: str, finding: Finding, used: set[str]) -> str:
     return candidate
 
 
-def _payload_for(
-    finding: Finding, schemas: dict[str, SchemaInfo], root: Path
-) -> dict[str, Any]:
+def _payload_for(finding: Finding, schemas: dict[str, SchemaInfo], root: Path) -> dict[str, Any]:
     """Read the endpoint's request model from the handler's own signature.
 
     Matching on the code snippet was too loose; the annotation on the handler
@@ -328,7 +331,10 @@ def _collect_models(files: list[Path]) -> dict[str, ModelInfo]:
                         rendered_value = (
                             cst.Module(body=[]).code_for_node(small.value) if small.value else ""
                         )
-                        if "nullable=False" in rendered_value or "primary_key=True" in rendered_value:
+                        if (
+                            "nullable=False" in rendered_value
+                            or "primary_key=True" in rendered_value
+                        ):
                             info.non_null.add(name)
             models[info.name] = info
     return models
@@ -384,9 +390,7 @@ def _guess_app_module(files: list[Path], root: Path) -> str | None:
         # form `app = create_app()` in a module that imports FastAPI.
         match = re.search(r"^(\w+)\s*=\s*FastAPI\(", source, re.MULTILINE)
         if match is None:
-            match = re.search(
-                r"^(app|application)\s*=\s*\w+\(\s*\)", source, re.MULTILINE
-            )
+            match = re.search(r"^(app|application)\s*=\s*\w+\(\s*\)", source, re.MULTILINE)
         if not match:
             continue
         try:

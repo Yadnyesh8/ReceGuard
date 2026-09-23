@@ -126,8 +126,13 @@ def test_spec_derivation_works_with_no_model_configured():
 
 def test_gate_rejects_an_unknown_table():
     invariant = Invariant(
-        kind="non_negative", table="ghosts", column="x", predicate="p",
-        check_sql="SELECT 1", source="spec", derivation="d",
+        kind="non_negative",
+        table="ghosts",
+        column="x",
+        predicate="p",
+        check_sql="SELECT 1",
+        source="spec",
+        derivation="d",
     )
     with pytest.raises(InvariantRejected) as excinfo:
         validate(invariant, items_schema())
@@ -136,8 +141,13 @@ def test_gate_rejects_an_unknown_table():
 
 def test_gate_rejects_an_unknown_column():
     invariant = Invariant(
-        kind="non_negative", table="items", column="nope", predicate="p",
-        check_sql="SELECT 1", source="spec", derivation="d",
+        kind="non_negative",
+        table="items",
+        column="nope",
+        predicate="p",
+        check_sql="SELECT 1",
+        source="spec",
+        derivation="d",
     )
     with pytest.raises(InvariantRejected) as excinfo:
         validate(invariant, items_schema())
@@ -149,8 +159,13 @@ def test_gate_without_a_database_does_not_claim_steps_2_to_4_passed():
     """Skipping a step and passing it are different things, and a report that
     conflates them is how an unvalidated invariant reaches the harness."""
     invariant = Invariant(
-        kind="non_negative", table="items", column="stock", predicate="p",
-        check_sql="SELECT * FROM items WHERE stock < 0", source="schema", derivation="d",
+        kind="non_negative",
+        table="items",
+        column="stock",
+        predicate="p",
+        check_sql="SELECT * FROM items WHERE stock < 0",
+        source="schema",
+        derivation="d",
     )
     report = validate(invariant, items_schema())
     skipped = [step for step in report.steps if "skipped" in step[3]]
@@ -161,8 +176,13 @@ def test_corruption_recipe_respects_not_null_columns():
     """`INSERT ... DEFAULT VALUES` fails on any NOT NULL column without a
     default, and a step 4 that cannot build its counterexample proves nothing."""
     invariant = Invariant(
-        kind="non_negative", table="items", column="stock", predicate="p",
-        check_sql="SELECT 1", source="schema", derivation="d",
+        kind="non_negative",
+        table="items",
+        column="stock",
+        predicate="p",
+        check_sql="SELECT 1",
+        source="schema",
+        derivation="d",
     )
     statements = build_corruption(invariant, items_schema())
     assert statements
@@ -173,8 +193,13 @@ def test_corruption_recipe_respects_not_null_columns():
 
 def test_corruption_for_duplicate_insert_makes_duplicates():
     invariant = Invariant(
-        kind="duplicate_insert", table="items", column="sku", predicate="p",
-        check_sql="SELECT 1", source="schema", derivation="d",
+        kind="duplicate_insert",
+        table="items",
+        column="sku",
+        predicate="p",
+        check_sql="SELECT 1",
+        source="schema",
+        derivation="d",
     )
     statements = build_corruption(invariant, items_schema(unique=True))
     assert statements and len(statements) >= 2
@@ -187,8 +212,12 @@ def test_critic_never_sees_the_proposers_reasoning():
     """A critic primed with the proposer's justification agrees with it. That
     is the entire reason this is a separate call with a separate prompt."""
     invariant = Invariant(
-        kind="non_negative", table="items", column="stock", predicate="p",
-        check_sql="SELECT 1", source="spec",
+        kind="non_negative",
+        table="items",
+        column="stock",
+        predicate="p",
+        check_sql="SELECT 1",
+        source="spec",
         derivation="I chose non_negative because the spec said 'below zero'",
         critic_note="earlier note",
     )
@@ -201,8 +230,13 @@ def test_critic_never_sees_the_proposers_reasoning():
 def test_critic_is_a_no_op_without_a_model():
     verdict = criticise(
         Invariant(
-            kind="non_negative", table="items", column="stock", predicate="p",
-            check_sql="SELECT 1", source="spec", derivation="d",
+            kind="non_negative",
+            table="items",
+            column="stock",
+            predicate="p",
+            check_sql="SELECT 1",
+            source="spec",
+            derivation="d",
         ),
         "spec",
         items_schema(),

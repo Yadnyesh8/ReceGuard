@@ -29,8 +29,6 @@ async def create_order_execute(item_id: int, qty: int, session: AsyncSession):
     if item.stock < qty:
         raise HTTPException(409, "not enough stock")
     new_stock = item.stock - qty
-    await session.execute(
-        update(Item).where(Item.id == item_id).values(stock=new_stock)
-    )
+    await session.execute(update(Item).where(Item.id == item_id).values(stock=new_stock))
     await session.commit()
     return {"item_id": item_id, "remaining": new_stock}

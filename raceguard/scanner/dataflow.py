@@ -320,9 +320,7 @@ class HandlerVisitor(cst.CSTVisitor):
         elif isinstance(target, (cst.Tuple, cst.List)):
             for element in target.elements:
                 if isinstance(element.value, cst.Name):
-                    self.analysis.taints[element.value.value] = Taint(
-                        element.value.value, origin
-                    )
+                    self.analysis.taints[element.value.value] = Taint(element.value.value, origin)
 
     def visit_For(self, node: cst.For) -> None:
         """`for row in rows:` keeps the taint on the loop variable."""
@@ -387,9 +385,11 @@ class HandlerVisitor(cst.CSTVisitor):
         for handler in node.handlers:
             names = _exception_names(handler.type)
             body_src = _flatten_names(handler.body)
-            catches_retryable = bool(names & _RETRYABLE) or bool(
-                _RETRYABLE_CODES & _string_constants(handler.body)
-            ) or bool(_RETRYABLE_CODES & _string_constants(handler.type))
+            catches_retryable = (
+                bool(names & _RETRYABLE)
+                or bool(_RETRYABLE_CODES & _string_constants(handler.body))
+                or bool(_RETRYABLE_CODES & _string_constants(handler.type))
+            )
             if catches_retryable and ({"retry", "continue", "again", "attempt"} & body_src):
                 self.analysis.has_retry_wrapper = True
                 self.analysis.guards.add(GUARD_RETRY_WRAPPER)
@@ -660,10 +660,7 @@ def analyze_handler(
             taints_before = len(analysis.taints)
             writes_before = len(analysis.writes)
             node.body.visit(visitor)
-            if (
-                len(analysis.taints) == taints_before
-                and len(analysis.writes) == writes_before
-            ):
+            if len(analysis.taints) == taints_before and len(analysis.writes) == writes_before:
                 break
 
     if (len(analysis.reads), len(analysis.writes)) != before and analysis.inlined_helpers:

@@ -10,7 +10,7 @@ import pytest
 from raceguard.hygiene import check
 from raceguard.hygiene.limiter import LimiterSpec, generate
 
-UNSAFE_IDEMPOTENCY = '''
+UNSAFE_IDEMPOTENCY = """
 from fastapi import APIRouter, Header
 from sqlalchemy import select
 router = APIRouter()
@@ -23,9 +23,9 @@ async def pay(idempotency_key: str = Header(...), session=None):
     result = await do_work()
     session.add(IdemKey(key=idempotency_key, response=result))
     return result
-'''
+"""
 
-SAFE_IDEMPOTENCY = '''
+SAFE_IDEMPOTENCY = """
 from fastapi import APIRouter, Header
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
@@ -39,9 +39,9 @@ async def pay(idempotency_key: str = Header(...), session=None):
     except IntegrityError:
         return await replay(idempotency_key)
     return await do_work()
-'''
+"""
 
-SWALLOWED = '''
+SWALLOWED = """
 from fastapi import APIRouter
 router = APIRouter()
 
@@ -51,9 +51,9 @@ async def x(session=None):
         await session.commit()
     except SerializationFailure:
         pass
-'''
+"""
 
-LIMITED = '''
+LIMITED = """
 from fastapi import FastAPI
 from slowapi import Limiter
 app = FastAPI()
@@ -62,7 +62,7 @@ limiter = Limiter(key_func=lambda r: r.client.host)
 @app.post("/x")
 async def x(session=None):
     session.add(Thing())
-'''
+"""
 
 
 def write(tmp_path: Path, name: str, source: str) -> Path:
@@ -89,7 +89,7 @@ def test_claim_first_is_not_flagged(tmp_path):
 
 def test_missing_idempotency_on_a_creating_route(tmp_path):
     (tmp_path / "create.py").write_text(
-        'from fastapi import APIRouter\nrouter = APIRouter()\n'
+        "from fastapi import APIRouter\nrouter = APIRouter()\n"
         '@router.post("/create")\nasync def create(session=None):\n'
         "    session.add(Order())\n"
     )
@@ -108,7 +108,7 @@ def test_missing_rate_limit_is_reported_once_per_app(tmp_path):
     """Forty identical findings is noise, not signal."""
     for index in range(4):
         (tmp_path / f"r{index}.py").write_text(
-            'from fastapi import APIRouter\nrouter = APIRouter()\n'
+            "from fastapi import APIRouter\nrouter = APIRouter()\n"
             f'@router.post("/r{index}")\nasync def r{index}(session=None):\n'
             "    session.add(Thing())\n"
         )
@@ -125,7 +125,7 @@ def test_a_detected_limiter_silences_the_rule(tmp_path):
 
 def test_reverse_proxy_config_counts_as_a_limiter(tmp_path):
     (tmp_path / "app.py").write_text(
-        'from fastapi import APIRouter\nrouter = APIRouter()\n'
+        "from fastapi import APIRouter\nrouter = APIRouter()\n"
         '@router.post("/x")\nasync def x(session=None):\n    session.add(T())\n'
     )
     (tmp_path / "nginx.conf").write_text(
@@ -169,8 +169,8 @@ def test_generated_limiter_compiles(distributed):
 @pytest.mark.parametrize("distributed", [False, True])
 def test_generated_limiter_advertises_both_header_spellings(distributed):
     _name, source = generate(LimiterSpec(distributed=distributed))
-    assert "RateLimit-Limit" in source      # de facto deployed convention
-    assert "RateLimit-Policy" in source     # IETF httpapi draft
+    assert "RateLimit-Limit" in source  # de facto deployed convention
+    assert "RateLimit-Policy" in source  # IETF httpapi draft
     assert "Retry-After" in source
 
 

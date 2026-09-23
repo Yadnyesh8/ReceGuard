@@ -25,9 +25,7 @@ app = FastAPI()
 
 
 @app.post("/products/{product_id}/reviews-guarded")
-async def create_review_guarded(
-    product_id: int, user_id: int, rating: int, session: AsyncSession
-):
+async def create_review_guarded(product_id: int, user_id: int, rating: int, session: AsyncSession):
     review = Review(user_id=user_id, product_id=product_id, rating=rating)
     session.add(review)
     try:
