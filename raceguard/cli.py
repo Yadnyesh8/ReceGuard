@@ -148,9 +148,7 @@ def _load(path: str | None, start: str = ".") -> Config:
 def scan(
     path: str = typer.Argument(".", help="File or directory to scan."),
     format: str = typer.Option("text", "--format", "-f", help="text | json | sarif | html"),
-    min_confidence: str = typer.Option(
-        "medium", "--min-confidence", help="high | medium | low"
-    ),
+    min_confidence: str = typer.Option("medium", "--min-confidence", help="high | medium | low"),
     show_suppressed: bool = typer.Option(False, "--show-suppressed"),
     hygiene: bool = typer.Option(False, "--hygiene", help="Also run the hygiene rules."),
     fail_on: str = typer.Option("high", "--fail-on", help="Gate: high | medium | low | never"),
@@ -353,7 +351,9 @@ _INPROCESS_WARNING = (
 def fix(
     target: str | None = typer.Option(None, "--target", "-t"),
     finding: str | None = typer.Option(None, "--finding", help="Finding id from a scan."),
-    rule: str | None = typer.Option(None, "--rule", help="A hygiene rule, e.g. missing_rate_limit."),
+    rule: str | None = typer.Option(
+        None, "--rule", help="A hygiene rule, e.g. missing_rate_limit."
+    ),
     apply: bool = typer.Option(False, "--apply", help="Apply, reverify, and run your tests."),
     path: str = typer.Option(".", "--path"),
     config: str | None = typer.Option(None, "--config", "-c"),
@@ -392,9 +392,11 @@ def fix(
         patch = propose(item, invariant, root=cfg.root)
         patches.append(patch)
         out.print(
-                text_report.render_patch(patch, colour=out.is_terminal),
-                highlight=False, markup=False, soft_wrap=True,
-            )
+            text_report.render_patch(patch, colour=out.is_terminal),
+            highlight=False,
+            markup=False,
+            soft_wrap=True,
+        )
         out.print("")
 
         if apply:
@@ -405,7 +407,9 @@ def fix(
             invariant = invariants.get(item.tables[0]) if item.tables else None
             reverify = None
             if matched is not None:
-                reverify = _make_reverifier(cfg)
+                # The patch's own migration is applied to the reverify template
+                # so the patched code is tested against the schema it requires.
+                reverify = _make_reverifier(cfg, migration=patch.migration)
             elif not target:
                 console.print(
                     "[yellow]no target in raceguard.yaml matches this finding, so the "
@@ -415,8 +419,12 @@ def fix(
                 continue
 
             result_apply = apply_patch(
-                patch, cfg, target=matched, invariant=invariant,
-                root=cfg.root, reverify=reverify,
+                patch,
+                cfg,
+                target=matched,
+                invariant=invariant,
+                root=cfg.root,
+                reverify=reverify,
             )
             if result_apply.ok:
                 console.print(
@@ -436,7 +444,9 @@ def fix(
                 )
     run.write_json("patches.json", [p.model_dump(mode="json") for p in patches])
     if not apply:
-        console.print("[dim]nothing was written. Re-run with --apply to apply, reverify, and test.[/]")
+        console.print(
+            "[dim]nothing was written. Re-run with --apply to apply, reverify, and test.[/]"
+        )
     raise typer.Exit(EXIT_OK)
 
 
@@ -447,21 +457,31 @@ def _target_for_finding(cfg: Config, finding) -> Target | None:
     return None
 
 
-def _make_reverifier(cfg: Config):
-    """Step 4: expect zero violations in T of T trials, amplified."""
+def _make_reverifier(cfg: Config, migration=None):
+    """Step 4: expect zero violations in T of T trials, amplified.
+
+    When the patch ships a schema change, that change is applied to the
+    template BEFORE the trials clone from it. Without this the patched code
+    (an ON CONFLICT against a unique index, a version-column predicate) runs
+    against a schema that lacks what it references, so the reverify errors and
+    an otherwise-correct fix can never be applied.
+    """
+    from . import db
     from .harness import start_run, verify_target
     from .synth import derive_for_target
 
     def reverify(target, invariant):
         context = start_run(cfg)
         try:
+            if migration is not None:
+                db.apply_ddl(context.template_url, migration.statement)
             resolved = invariant or derive_for_target(
-                cfg, target, admin_url=context.admin_url,
+                cfg,
+                target,
+                admin_url=context.admin_url,
                 template=cfg.database.template_name,
             )
-            return asyncio.run(
-                verify_target(context, target, resolved, amplify=True)
-            )
+            return asyncio.run(verify_target(context, target, resolved, amplify=True))
         finally:
             context.cleanup()
 
@@ -504,9 +524,7 @@ def init(
     root = Path(path).resolve()
     destination = root / "raceguard.yaml"
     if destination.exists() and not force:
-        raise RaceGuardError(
-            f"{destination} already exists", hint="pass --force to overwrite it"
-        )
+        raise RaceGuardError(f"{destination} already exists", hint="pass --force to overwrite it")
     text = generate_config(root)
     destination.write_text(text, encoding="utf-8")
     out.print(f"wrote {destination}")
@@ -532,17 +550,17 @@ def report(
     root = Path.cwd()
     runs = sorted((root / RUNS_DIR).glob("*")) if (root / RUNS_DIR).is_dir() else []
     if not runs:
-        raise RaceGuardError("no runs found", hint="run `raceguard scan` or `raceguard verify` first")
-    directory = runs[-1] if run == "latest" else next(
-        (d for d in runs if d.name.endswith(run)), None
+        raise RaceGuardError(
+            "no runs found", hint="run `raceguard scan` or `raceguard verify` first"
+        )
+    directory = (
+        runs[-1] if run == "latest" else next((d for d in runs if d.name.endswith(run)), None)
     )
     if directory is None:
         raise RaceGuardError(f"no run matching {run!r}")
 
     scan_result = _read_model(directory / "findings.json", ScanResult)
-    verdicts = [
-        Verdict.model_validate(v) for v in _read_json(directory / "verdicts.json", [])
-    ]
+    verdicts = [Verdict.model_validate(v) for v in _read_json(directory / "verdicts.json", [])]
     if format == "html":
         rendered = html_report.render(
             scan=scan_result, verdicts=verdicts, run_id=directory.name, tool_version=TOOL_VERSION
@@ -592,7 +610,9 @@ def clean(
     if not force:
         live = subprocess.run(
             ["docker", "ps", "-q", "--filter", "label=raceguard.run"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         running = [line for line in live.stdout.split() if line]
         if running:
@@ -605,7 +625,9 @@ def clean(
     try:
         listed = subprocess.run(
             ["docker", "ps", "-aq", "--filter", "label=raceguard.run"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         ids = [line for line in listed.stdout.split() if line]
         if ids:
@@ -613,7 +635,8 @@ def clean(
             removed = len(ids)
         subprocess.run(
             ["docker", "network", "prune", "-f", "--filter", "label=raceguard.run"],
-            capture_output=True, timeout=60,
+            capture_output=True,
+            timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         console.print(f"[yellow]docker cleanup skipped: {exc}[/]")
@@ -643,13 +666,20 @@ def doctor(
     try:
         info = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=30)
         checks.append(
-            ("docker daemon", info.returncode == 0,
-             "reachable" if info.returncode == 0 else info.stderr.strip()[:120])
+            (
+                "docker daemon",
+                info.returncode == 0,
+                "reachable" if info.returncode == 0 else info.stderr.strip()[:120],
+            )
         )
     except (OSError, subprocess.SubprocessError) as exc:
         checks.append(("docker daemon", False, str(exc)[:120]))
 
-    for module, extra in (("psycopg", "harness"), ("testcontainers", "harness"), ("libcst", "core")):
+    for module, extra in (
+        ("psycopg", "harness"),
+        ("testcontainers", "harness"),
+        ("libcst", "core"),
+    ):
         try:
             __import__(module)
             checks.append((f"import {module}", True, extra))
@@ -660,17 +690,24 @@ def doctor(
         cfg = _load(config)
         checks.append(("raceguard.yaml", True, f"{len(cfg.targets)} target(s)"))
         checks.append(
-            ("database image pinned by digest", cfg.database.pinned_by_digest,
-             cfg.database.image if cfg.database.pinned_by_digest
-             else "pinned by tag; a moved tag can silently change results")
+            (
+                "database image pinned by digest",
+                cfg.database.pinned_by_digest,
+                cfg.database.image
+                if cfg.database.pinned_by_digest
+                else "pinned by tag; a moved tag can silently change results",
+            )
         )
         if cfg.app.module:
             checks.append(("app.module set (inprocess mode)", True, cfg.app.module))
         if cfg.defaults.concurrency > cfg.app.thread_pool_size:
             checks.append(
-                ("concurrency vs thread pool", False,
-                 f"concurrency {cfg.defaults.concurrency} exceeds the declared pool of "
-                 f"{cfg.app.thread_pool_size}; `def` handlers will queue and hide a race")
+                (
+                    "concurrency vs thread pool",
+                    False,
+                    f"concurrency {cfg.defaults.concurrency} exceeds the declared pool of "
+                    f"{cfg.app.thread_pool_size}; `def` handlers will queue and hide a race",
+                )
             )
     except RaceGuardError as exc:
         checks.append(("raceguard.yaml", False, exc.message))
@@ -687,6 +724,204 @@ def doctor(
 def version() -> None:
     """Print the version."""
     out.print(f"raceguard {TOOL_VERSION}")
+
+
+# --------------------------------------------------------------------------
+# ci: the one entry point every CI system calls
+# --------------------------------------------------------------------------
+
+
+@app.command()
+def ci(
+    path: str = typer.Argument(".", help="Project root."),
+    provider: str = typer.Option("auto", "--provider", help="auto | github | gitlab | generic"),
+    base: str | None = typer.Option(
+        None, "--base", help="Diff base ref; auto-detected per provider."
+    ),
+    changed_only: bool | None = typer.Option(
+        None,
+        "--changed-only/--all-files",
+        help="Gate on findings in changed files only (default: on for pull requests).",
+    ),
+    fail_on: str = typer.Option("high", "--fail-on", help="high | medium | low | never"),
+    baseline: str | None = typer.Option(
+        None, "--baseline", help="Accepted findings, by fingerprint."
+    ),
+    verify: bool = typer.Option(
+        False, "--verify/--no-verify", help="Verify targets whose handler changed."
+    ),
+    verify_required: bool = typer.Option(
+        False, "--verify-required", help="Fail (exit 3) rather than skip when Docker is missing."
+    ),
+    budget_seconds: int | None = typer.Option(
+        None, "--budget-seconds", help="Wall clock cap for verification."
+    ),
+    hygiene: bool = typer.Option(True, "--hygiene/--no-hygiene"),
+    sarif: str | None = typer.Option(
+        "raceguard.sarif", "--sarif", help="SARIF 2.1.0 output; '' to skip."
+    ),
+    json_path: str | None = typer.Option(None, "--json", help="Machine readable output path."),
+    codequality: str | None = typer.Option(
+        None, "--codequality", help="GitLab Code Quality report path."
+    ),
+    summary_path: str | None = typer.Option(None, "--summary", help="Markdown summary path."),
+    annotations: bool = typer.Option(True, "--annotations/--no-annotations"),
+    comment: bool = typer.Option(False, "--comment/--no-comment", help="Sticky PR/MR comment."),
+    category: str = typer.Option("raceguard", "--category", help="SARIF category."),
+) -> None:
+    """Scan, verify what changed, gate, and emit every report the CI host reads.
+
+    Exit 0 clean, 1 gated findings or violations, 2 configuration, 3 infrastructure.
+    """
+    from .ci import CIOptions, render_text
+    from .ci import run as run_ci
+
+    options = CIOptions(
+        path=path,
+        provider=provider,
+        base=base,
+        changed_only=changed_only,
+        fail_on=fail_on,
+        baseline=baseline,
+        verify=verify,
+        verify_required=verify_required,
+        budget_seconds=budget_seconds,
+        hygiene=hygiene,
+        sarif=sarif or None,
+        json_path=json_path,
+        codequality=codequality,
+        summary_path=summary_path,
+        annotations=annotations,
+        comment=comment,
+        category=category,
+    )
+    result = run_ci(options)
+    out.print(render_text(result), highlight=False, markup=False, soft_wrap=True)
+    for name, written in result.written.items():
+        console.print(f"[dim]{name}: {written}[/]")
+    raise typer.Exit(result.exit_code)
+
+
+baseline_app = typer.Typer(help="Accepted findings a build should report but not block on.")
+app.add_typer(baseline_app, name="baseline")
+
+
+@baseline_app.command("write")
+def baseline_write(
+    path: str = typer.Argument(".", help="Project root."),
+    output: str = typer.Option(".raceguard/baseline.json", "--output", "-o"),
+) -> None:
+    """Record every current finding's fingerprint so the next run does not gate on it."""
+    from .ci.baseline import Baseline
+    from .scanner import ScanOptions
+    from .scanner import scan as run_scan
+
+    root = Path(path).resolve()
+    result = run_scan([str(root)], ScanOptions(min_confidence=Confidence.low, root=root))
+    written = Baseline.from_findings(result.findings).write(root / output)
+    out.print(f"wrote {written} with {len(result.findings)} fingerprint(s)")
+    console.print(
+        "[dim]A baseline is accepted debt, not a fix. Regenerate it as findings are "
+        "resolved so it shrinks rather than rots.[/]"
+    )
+
+
+@baseline_app.command("check")
+def baseline_check(
+    path: str = typer.Argument(".", help="Project root."),
+    baseline: str = typer.Option(".raceguard/baseline.json", "--baseline", "-b"),
+    fail_on: str = typer.Option("high", "--fail-on"),
+) -> None:
+    """Exit 1 on findings above the gate that are not in the baseline; report stale entries."""
+    from .ci.baseline import Baseline
+    from .scanner import ScanOptions
+    from .scanner import scan as run_scan
+
+    root = Path(path).resolve()
+    accepted = Baseline.load(root / baseline)
+    result = run_scan([str(root)], ScanOptions(min_confidence=Confidence.low, root=root))
+    threshold = Confidence(fail_on).rank() if fail_on != "never" else 99
+    new = [
+        f
+        for f in result.findings
+        if not f.suppressed and f.confidence.rank() >= threshold and not accepted.contains(f)
+    ]
+    stale = accepted.stale(result.findings)
+    for finding in new:
+        out.print(
+            f"new: {finding.read_site.file}:{finding.read_site.start_line} "
+            f"{finding.pattern} [{finding.confidence.value}] {finding.route or ''}"
+        )
+    if stale:
+        console.print(
+            f"[yellow]{len(stale)} stale baseline entr{'y' if len(stale) == 1 else 'ies'}; regenerate with `raceguard baseline write`[/]"
+        )
+    if new:
+        out.print(f"{len(new)} finding(s) not in the baseline")
+        raise typer.Exit(EXIT_FINDINGS)
+    out.print(f"no findings above {fail_on} outside the baseline")
+
+
+# --------------------------------------------------------------------------
+# mcp: serve and install
+# --------------------------------------------------------------------------
+
+
+mcp_app = typer.Typer(help="The MCP server: stdio for editors, HTTP for hosting.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    transport: str | None = typer.Option(None, "--transport", help="stdio | http"),
+    host: str | None = typer.Option(None, "--host"),
+    port: int | None = typer.Option(None, "--port"),
+    project_root: str | None = typer.Option(
+        None, "--project-root", help="Sandbox root for every path."
+    ),
+    allow_any_path: bool = typer.Option(
+        False, "--allow-any-path", help="Disable the path sandbox (stdio only)."
+    ),
+    allow_anonymous: bool = typer.Option(
+        False, "--allow-anonymous", help="HTTP without bearer tokens (loopback only)."
+    ),
+    no_verify: bool = typer.Option(False, "--no-verify", help="Disable verify_handler entirely."),
+) -> None:
+    """Start the MCP server. Settings come from RACEGUARD_MCP_* with these overrides."""
+    from .mcp.server import serve
+    from .mcp.settings import MCPSettings
+
+    settings = MCPSettings.from_env()
+    if transport:
+        settings.transport = transport  # type: ignore[assignment]
+    if host:
+        settings.host = host
+    if port:
+        settings.port = port
+    if project_root:
+        settings.project_root = Path(project_root).resolve()
+    if allow_any_path:
+        settings.allow_any_path = True
+    if allow_anonymous:
+        settings.allow_anonymous = True
+    if no_verify:
+        settings.verify_enabled = False
+    serve(settings)
+
+
+@mcp_app.command("install")
+def mcp_install(
+    host: str = typer.Argument(..., help="claude-desktop | claude-code | cursor | vscode"),
+    write: bool = typer.Option(False, "--write", help="Write into the host's config file."),
+    project_root: str | None = typer.Option(None, "--project-root"),
+) -> None:
+    """Print (or write) the host configuration that launches this server over stdio."""
+    from .mcp.install import install
+
+    rendered, written = install(host, write=write, project_root=project_root)
+    out.print(rendered, highlight=False, markup=False, soft_wrap=True)
+    if written:
+        console.print(f"[green]written to {written}[/]")
 
 
 # --------------------------------------------------------------------------
