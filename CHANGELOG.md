@@ -9,6 +9,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `raceguard ci`: one CI engine for GitHub Actions, GitLab CI and any other
+  system, with changed-only gating on pull requests, a fingerprint baseline,
+  a verification wall-clock budget, GitLab Code Quality output, inline
+  annotations and a sticky PR/MR comment. The GitHub Action and a new GitLab
+  template both call it.
+- `raceguard baseline write|check` and `Finding.fingerprint`, a line-independent
+  key that also feeds SARIF `primaryLocationLineHash`.
+- `raceguard mcp serve|install`: the MCP server moved to `raceguard.mcp` with a
+  streamable HTTP transport, bearer auth, a path sandbox, per-client budgets, a
+  verify concurrency gate, `/healthz` `/readyz` `/metrics` `/version`, resources,
+  prompts, tool annotations and drain-on-shutdown. `raceguard.mcp_server` stays
+  as a shim.
+
+
 ## [0.1.0] - 2026-08-31
 
 First release.

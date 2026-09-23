@@ -90,6 +90,27 @@ docker run --rm \
     sarif_file: raceguard.sarif
 ```
 
+Any other CI system calls the same engine directly:
+
+```bash
+raceguard ci --base origin/main --sarif raceguard.sarif   # exit 1 on gated findings
+```
+
+GitLab users include `ci/gitlab/raceguard.gitlab-ci.yml`. Adopting on a
+codebase with existing findings: `raceguard baseline write`, commit the file,
+pass `--baseline`. See [docs/ci.md](docs/ci.md).
+
+### As an MCP server
+
+```bash
+raceguard mcp install claude-code --write      # also: claude-desktop, cursor, vscode
+raceguard mcp serve --transport http --port 8765   # hosted, with RACEGUARD_MCP_TOKENS
+```
+
+Every path is sandboxed to the project root, verification is budgeted per
+client, and `/healthz`, `/readyz` and `/metrics` are there for whoever runs
+it. See [docs/mcp.md](docs/mcp.md).
+
 ### As a pre-commit hook
 
 ```yaml
