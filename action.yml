@@ -1,36 +1,90 @@
 name: "RaceGuard"
 description: >-
   Find, prove, and repair atomicity violations in Python HTTP handlers.
-  Scans on every push and, optionally, verifies only the targets whose handler
-  files appear in the diff.
+  Scans on every push, gates pull requests on what changed, and optionally
+  verifies only the targets whose handler files appear in the diff.
 author: "RaceGuard"
 branding:
   icon: "git-merge"
   color: "orange"
+
+# Permissions the calling workflow needs:
+#   contents: read           always
+#   security-events: write   to upload the SARIF with codeql-action/upload-sarif
+#   pull-requests: write     for `comment: true`
 
 inputs:
   path:
     description: "Directory to scan."
     required: false
     default: "."
+  version:
+    description: >-
+      RaceGuard release to install from PyPI. Empty installs the checked-out
+      action itself, which works before any release exists and pins you to the
+      action ref.
+    required: false
+    default: ""
   fail-on:
     description: "Gate the build on this confidence level: high, medium, low, or never."
     required: false
     default: "high"
+  changed-only:
+    description: >-
+      Gate only on findings in files changed by this pull request. "auto"
+      (default) means yes on pull_request events and no on push.
+    required: false
+    default: "auto"
+  base-ref:
+    description: "Diff base. Defaults to the pull request base or the push's previous SHA."
+    required: false
+    default: ""
+  baseline:
+    description: "Path to a baseline written by `raceguard baseline write`. Findings in it never gate."
+    required: false
+    default: ""
   verify:
     description: >-
       Also run dynamic verification for targets whose handler changed in this
       diff. Requires Docker on the runner and a raceguard.yaml.
     required: false
     default: "false"
+  verify-required:
+    description: "With verify: fail (exit 3) rather than skip when Docker is unavailable."
+    required: false
+    default: "false"
+  budget-seconds:
+    description: "Wall clock cap for the verification phase; remaining targets are reported as skipped."
+    required: false
+    default: ""
   hygiene:
     description: "Also run the idempotency, rate limit, and optimistic concurrency rules."
     required: false
     default: "true"
+  annotations:
+    description: "Emit inline workflow annotations (no upload permission needed)."
+    required: false
+    default: "true"
+  comment:
+    description: "Post one sticky comment on the pull request, updated in place on later pushes."
+    required: false
+    default: "false"
+  token:
+    description: "Token for the sticky comment. Defaults to github.token."
+    required: false
+    default: ${{ github.token }}
   sarif-file:
     description: "Where to write the SARIF 2.1.0 results."
     required: false
     default: "raceguard.sarif"
+  json-file:
+    description: "Where to write the machine readable JSON report; empty skips it."
+    required: false
+    default: ""
+  codequality-file:
+    description: "Where to write a GitLab Code Quality report; empty skips it."
+    required: false
+    default: ""
   category:
     description: >-
       SARIF category. If more than one results file is uploaded for this tool in
@@ -41,10 +95,19 @@ inputs:
 outputs:
   findings:
     description: "Number of findings."
+    value: ${{ steps.run.outputs.findings }}
+  gated:
+    description: "Number of findings that gate this build."
+    value: ${{ steps.run.outputs.gated }}
   violations:
     description: "Number of targets whose invariant was violated."
+    value: ${{ steps.run.outputs.violations }}
   sarif:
     description: "Path to the SARIF file."
+    value: ${{ steps.run.outputs.sarif }}
+  exit-code:
+    description: "0 clean, 1 gated findings or violations, 2 configuration, 3 infrastructure."
+    value: ${{ steps.run.outputs.exit-code }}
 
 runs:
   using: "composite"
@@ -55,14 +118,33 @@ runs:
         python-version: "3.12"
     - name: Install RaceGuard
       shell: bash
-      run: pip install "raceguard[harness]"
+      env:
+        RACEGUARD_VERSION: ${{ inputs.version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        if [ -n "$RACEGUARD_VERSION" ]; then
+          pip install --quiet "raceguard[harness]==${RACEGUARD_VERSION}"
+        else
+          pip install --quiet "${ACTION_PATH}[harness]"
+        fi
     - name: Run RaceGuard
+      id: run
       shell: bash
       env:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_CHANGED_ONLY: ${{ inputs.changed-only }}
+        INPUT_BASE_REF: ${{ inputs.base-ref }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
         INPUT_VERIFY: ${{ inputs.verify }}
+        INPUT_VERIFY_REQUIRED: ${{ inputs.verify-required }}
+        INPUT_BUDGET_SECONDS: ${{ inputs.budget-seconds }}
         INPUT_HYGIENE: ${{ inputs.hygiene }}
+        INPUT_ANNOTATIONS: ${{ inputs.annotations }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_TOKEN: ${{ inputs.token }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_JSON_FILE: ${{ inputs.json-file }}
+        INPUT_CODEQUALITY_FILE: ${{ inputs.codequality-file }}
         INPUT_CATEGORY: ${{ inputs.category }}
       run: python -m raceguard.action.entrypoint

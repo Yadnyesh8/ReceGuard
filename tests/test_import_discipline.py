@@ -3,8 +3,8 @@
 * contracts.py imports nothing from the project.
 * Engine packages may import contracts, config, and errors, and nothing else
   from each other, with one exception: patch may import harness to reverify.
-* Only cli.py, mcp_server.py, and action/ may import more than one engine
-  package.
+* Only the adapters (cli.py, action/, ci/, mcp/, init.py, and the mcp_server
+  shim) may import more than one engine package.
 
 The reason is not aesthetics. Two adapters that both reimplement orchestration
 drift within a month.
@@ -22,7 +22,10 @@ SHARED = {"contracts", "config", "errors"}
 ENGINES = {"scanner", "synth", "harness", "hygiene", "patch", "report"}
 # `init` turns a scan into a config file: that is orchestration, so it is an
 # adapter, not an engine, even though it lives beside them.
-ADAPTERS = {"cli", "mcp_server", "action", "init"}
+# `ci` is the engine every CI system calls and `mcp` is the hosted server:
+# both combine scanner, hygiene, harness, patch and report, which is exactly
+# what an adapter is for.
+ADAPTERS = {"cli", "mcp_server", "mcp", "action", "ci", "init"}
 ALLOWED_CROSS = {
     # patch reverifies through the harness (section 4 names this exception)
     ("patch", "harness"),

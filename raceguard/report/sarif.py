@@ -94,8 +94,7 @@ HYGIENE_RULES: dict[str, tuple[str, str]] = {
     ),
     "unbounded_retry": (
         "Retry loop with no bound or no backoff",
-        "Bound the loop, use exponential backoff with jitter, and re-raise after "
-        "the cap.",
+        "Bound the loop, use exponential backoff with jitter, and re-raise after the cap.",
     ),
     "swallowed_serialization_failure": (
         "Serialization failure caught without retrying",
@@ -216,7 +215,13 @@ def _result(finding: Finding, verdict: Verdict | None) -> dict:
             )
             if location is not None
         ],
-        "partialFingerprints": {"raceguardFindingId": finding.id},
+        # primaryLocationLineHash is the key GitHub uses to carry an alert
+        # across pushes. The fingerprint is line-independent, so an edit above
+        # the handler does not open a fresh alert and close the old one.
+        "partialFingerprints": {
+            "primaryLocationLineHash": finding.fingerprint,
+            "raceguardFindingId": finding.id,
+        },
         "properties": {
             "confidence": finding.confidence.value,
             "handler": finding.handler,
@@ -234,14 +239,18 @@ def _hygiene_result(item: HygieneFinding) -> dict:
         "partialFingerprints": {"raceguardFindingId": item.id},
         "properties": {"route": item.route, "severity": item.severity},
     }
-    result["locations"] = [_location(item.span)] if item.span else [
-        {
-            "physicalLocation": {
-                "artifactLocation": {"uri": "raceguard.yaml", "uriBaseId": "%SRCROOT%"},
-                "region": {"startLine": 1},
+    result["locations"] = (
+        [_location(item.span)]
+        if item.span
+        else [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "raceguard.yaml", "uriBaseId": "%SRCROOT%"},
+                    "region": {"startLine": 1},
+                }
             }
-        }
-    ]
+        ]
+    )
     return result
 
 

@@ -76,11 +76,23 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.12
       - run: uv pip install --system -e ".[harness]"
-      - name: scan the reference app
+      - name: run the CI engine against the reference app
+        # The reference app is vulnerable on purpose, so the gate is off and
+        # the point is that the engine, the SARIF, the summary and the
+        # annotations all come out of the same path every other CI uses.
         run: |
-          raceguard scan examples/shop --format sarif -o raceguard.sarif --hygiene || true
+          raceguard ci examples/shop --fail-on never --all-files \
+            --sarif raceguard.sarif --json raceguard.json \
+            --codequality gl-code-quality-report.json --category raceguard-example
       - name: upload SARIF
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: raceguard.sarif
+          sarif_file: examples/shop/raceguard.sarif
           category: raceguard-example
+      - name: the action itself runs from this checkout
+        uses: ./
+        with:
+          path: examples/shop
+          fail-on: never
+          sarif-file: action.sarif
+          category: raceguard-action

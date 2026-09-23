@@ -1,0 +1,89 @@
+# RaceGuard for GitLab CI.
+#
+# Include it and override variables:
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/raceguard/raceguard/main/ci/gitlab/raceguard.gitlab-ci.yml
+#   variables:
+#     RACEGUARD_FAIL_ON: high
+#
+# The job publishes a Code Quality report (inline in the merge request widget)
+# and a SARIF file (the SAST report tab). `scan` needs no Docker. `verify`
+# needs Docker-in-Docker; the `raceguard:verify` job below shows the shape.
+
+variables:
+  RACEGUARD_VERSION: ""            # empty installs from the repository under test's pin, see below
+  RACEGUARD_PATH: "."
+  RACEGUARD_FAIL_ON: "high"
+  RACEGUARD_BASELINE: ""           # e.g. .raceguard/baseline.json
+  RACEGUARD_VERIFY: "false"
+  RACEGUARD_BUDGET_SECONDS: "300"
+  RACEGUARD_COMMENT: "false"       # needs GITLAB_TOKEN with api scope, or CI_JOB_TOKEN on newer GitLab
+
+.raceguard:install:
+  image: python:3.12-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
+    - |
+      if [ -n "$RACEGUARD_VERSION" ]; then
+        pip install --quiet "raceguard[harness]==${RACEGUARD_VERSION}"
+      else
+        pip install --quiet "raceguard[harness]"
+      fi
+    # A merge request pipeline runs on a detached HEAD; the diff base must be
+    # fetchable or changed-only gating degrades to every file (and says so).
+    - git fetch --quiet --depth=200 origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" 2>/dev/null || true
+
+raceguard:
+  extends: .raceguard:install
+  stage: test
+  script:
+    - |
+      ARGS="--provider gitlab --fail-on $RACEGUARD_FAIL_ON \
+        --sarif raceguard.sarif --codequality gl-code-quality-report.json \
+        --json raceguard.json --summary raceguard-summary.md"
+      [ -n "$RACEGUARD_BASELINE" ] && ARGS="$ARGS --baseline $RACEGUARD_BASELINE"
+      [ "$RACEGUARD_COMMENT" = "true" ] && ARGS="$ARGS --comment"
+      raceguard ci "$RACEGUARD_PATH" $ARGS
+  artifacts:
+    when: always
+    paths:
+      - raceguard.sarif
+      - raceguard.json
+      - raceguard-summary.md
+    reports:
+      codequality: gl-code-quality-report.json
+      sast: raceguard.sarif
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Dynamic verification. Boots PostgreSQL through the Docker socket, so it
+# needs the docker:dind service and a privileged runner. Runs only on merge
+# requests, only for targets whose handler changed, and inside a wall clock
+# budget so it cannot outlast the pipeline.
+raceguard:verify:
+  extends: .raceguard:install
+  stage: test
+  image: python:3.12
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - !reference [.raceguard:install, before_script]
+    - apt-get install -y -qq --no-install-recommends docker.io > /dev/null
+  script:
+    - |
+      raceguard ci "$RACEGUARD_PATH" --provider gitlab --fail-on "$RACEGUARD_FAIL_ON" \
+        --verify --budget-seconds "$RACEGUARD_BUDGET_SECONDS" \
+        --sarif raceguard-verify.sarif --category raceguard-verify \
+        --summary raceguard-verify-summary.md
+  artifacts:
+    when: always
+    paths:
+      - raceguard-verify.sarif
+      - raceguard-verify-summary.md
+  rules:
+    - if: $RACEGUARD_VERIFY == "true" && $CI_PIPELINE_SOURCE == "merge_request_event"
