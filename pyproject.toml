@@ -34,7 +34,7 @@ harness = [
   "psycopg[binary]>=3.1",
   "asyncpg>=0.29",
   "testcontainers[postgres]>=4.5",
-  "docker>=7.1",
+  "docker>=7.2.0",
 ]
 mcp = ["mcp>=1.28,<3"]
 dev = [
