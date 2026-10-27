@@ -23,7 +23,7 @@ jobs:
       - name: reproduction rates over the reference app
         run: pytest tests/test_integration.py -q -m docker | tee -a corpus-report.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: corpus-report-${{ github.run_number }}
