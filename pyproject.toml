@@ -43,7 +43,7 @@ dev = [
   "pytest-cov>=5.0",
   "types-PyYAML",
   "fastapi>=0.111",
-  "uvicorn>=0.30",
+  "uvicorn>=0.54.0",
   "alembic>=1.13",
   "ruff>=0.5",
   "mypy>=1.10",
