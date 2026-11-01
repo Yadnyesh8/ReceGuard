@@ -45,6 +45,8 @@ dev = [
   "fastapi>=0.111",
   "uvicorn>=0.30",
   "alembic>=1.13",
+  # The reference app in examples/shop runs from this environment in tests.
+  "sqlalchemy[asyncio]>=2.0.30",
   "ruff>=0.5",
   "mypy>=1.10",
 ]
