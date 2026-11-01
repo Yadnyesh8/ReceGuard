@@ -93,7 +93,7 @@ jobs:
             --sarif raceguard.sarif --json raceguard.json \
             --codequality gl-code-quality-report.json --category raceguard-example
       - name: upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: examples/shop/raceguard.sarif
           category: raceguard-example
