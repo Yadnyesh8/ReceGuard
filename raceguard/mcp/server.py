@@ -10,6 +10,8 @@ import sys
 import time
 from typing import Any
 
+from mcp.server import MCPServer
+
 from .. import __version__ as TOOL_VERSION
 from . import http as http_surface
 from . import prompts, resources, tools
@@ -18,19 +20,6 @@ from .runtime import Runtime
 from .settings import MCPSettings
 
 log = logging.getLogger("raceguard.mcp")
-
-# `pip install mcp` resolves to 2.x, where FastMCP became MCPServer while the
-# decorator API stayed the same. Both spellings are supported, resolved once.
-try:  # SDK v2
-    from mcp.server import MCPServer as _Server
-
-    SDK_MAJOR = 2
-except ImportError:  # pragma: no cover - SDK v1 fallback
-    from mcp.server.fastmcp import (
-        FastMCP as _Server,  # type: ignore[assignment,no-redef,attr-defined]
-    )
-
-    SDK_MAJOR = 1
 
 INSTRUCTIONS = (
     "RaceGuard finds, proves and repairs read-decide-write races in Python HTTP "
@@ -69,7 +58,7 @@ def configure_logging(settings: MCPSettings) -> None:
 def build(settings: MCPSettings) -> tuple[Any, Runtime]:
     """An MCPServer with every tool, resource, prompt and route registered."""
     runtime = Runtime.from_settings(settings)
-    mcp = _Server("raceguard", instructions=INSTRUCTIONS, version=TOOL_VERSION)
+    mcp = MCPServer("raceguard", instructions=INSTRUCTIONS, version=TOOL_VERSION)
     tools.register(mcp, runtime)
     resources.register(mcp, runtime)
     prompts.register(mcp, runtime)
@@ -143,9 +132,8 @@ def serve(settings: MCPSettings) -> None:
 def _serve_stdio(settings: MCPSettings) -> None:
     mcp, runtime = build(settings)
     log.info(
-        "raceguard MCP %s over stdio (SDK v%s), root=%s, sandbox=%s, verify=%s",
+        "raceguard MCP %s over stdio, root=%s, sandbox=%s, verify=%s",
         TOOL_VERSION,
-        SDK_MAJOR,
         settings.project_root,
         "off" if settings.allow_any_path else "on",
         settings.verify_enabled,
@@ -159,11 +147,10 @@ def _serve_http(settings: MCPSettings) -> None:
 
     app, runtime = build_http_app(settings)
     log.info(
-        "raceguard MCP %s over streamable HTTP on %s:%d (SDK v%s), root=%s, auth=%s, verify=%s",
+        "raceguard MCP %s over streamable HTTP on %s:%d, root=%s, auth=%s, verify=%s",
         TOOL_VERSION,
         settings.host,
         settings.port,
-        SDK_MAJOR,
         settings.project_root,
         "bearer" if settings.tokens else "anonymous (loopback)",
         settings.verify_enabled,

@@ -189,6 +189,11 @@ class Target(BaseModel):
             raise ValueError(f"target '{self.id}': route and group are mutually exclusive")
         return self
 
+    @property
+    def routes(self) -> list[str]:
+        """Every route this target fires, one for most, several for a group."""
+        return [self.route] if self.route else [member.route for member in self.group]
+
     def method_and_path(self) -> tuple[str, str]:
         if not self.route:
             raise ConfigError(f"target '{self.id}' has no single route (it is a group)")

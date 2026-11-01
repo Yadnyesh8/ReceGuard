@@ -36,7 +36,7 @@ harness = [
   "testcontainers[postgres]>=4.5",
   "docker>=7.1",
 ]
-mcp = ["mcp>=1.28,<3"]
+mcp = ["mcp>=2.1,<3"]
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
@@ -129,14 +129,3 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
 check_untyped_defs = true
-
-# The MCP Python SDK renamed FastMCP to MCPServer in v2, and this project
-# supports both because `pip install mcp` resolves to 2.x while a consumer not
-# ready to migrate pins `mcp>=1.28,<2`. Only one of the two imports can ever
-# type check, whichever version happens to be installed. Scoped here rather
-# than suppressed inline so it stays visible and can be deleted when v1
-# support is dropped.
-[[tool.mypy.overrides]]
-module = "raceguard.mcp.server"
-warn_unused_ignores = false
-disable_error_code = ["attr-defined", "no-redef", "assignment"]

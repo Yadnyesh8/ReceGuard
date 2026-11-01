@@ -24,7 +24,7 @@ oversell: two orders accepted against one unit of stock.
 | Endpoint | File | Invariant | The bug |
 |---|---|---|---|
 | `POST /orders` | `shop/routes/orders.py` | `non_negative` | reads `items.stock`, decides in Python, decrements -- no lock, no atomic expression, no `CHECK(stock >= 0)` |
-| `POST /wallet/transfer` | `shop/routes/wallet.py` | `conservation` | reads both balances, decides, writes both -- a lost update can change the pair's total |
+| `POST /wallet/transfer` | `shop/routes/wallet.py` | `conservation` | reads both balances, decides, writes both -- a lost update can change the accounts' total |
 | `POST /coupons/redeem` | `shop/routes/coupons.py` | `single_use` | counts prior redemptions, decides, inserts -- no unique index ties a redemption to its coupon |
 | `POST /signup` | `shop/routes/signup.py` | `duplicate_insert` | looks up by email, decides, inserts -- `users.email` has no unique index |
 | `POST /teams/{id}/members` | `shop/routes/teams.py` | `aggregate_limit` | counts members, decides, inserts -- nothing caps rows per team |

@@ -13,6 +13,7 @@ import os
 import sys
 
 from ..ci import CIOptions, render_text, run
+from ..errors import RaceGuardError
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -54,7 +55,11 @@ def main() -> int:
         comment=_flag("INPUT_COMMENT", False),
         category=os.environ.get("INPUT_CATEGORY", "raceguard"),
     )
-    result = run(options)
+    try:
+        result = run(options)
+    except RaceGuardError as exc:
+        print(f"::error::{exc.render()}".replace("\n", "%0A"))
+        return exc.exit_code
     print(render_text(result))
     return result.exit_code
 

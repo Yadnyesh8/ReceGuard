@@ -45,10 +45,13 @@ def detect(ctx: RuleContext) -> list[Finding]:
             # `update(...).values(stock=new_stock)` where new_stock was derived
             # from the read is the same defect written a different way, and
             # requiring the decrement spelling missed it entirely.
+            # The column has to be the one compared, though: `if user.age < 18:
+            # raise` followed by `user.name = body.name` guards nothing.
             if not (
                 write.decrement
-                or write.kind in {"augassign", "assign_attr", "helper_call"}
-                or (write.kind == "call" and _writes_decided_column(decision, write))
+                or write.kind in {"augassign", "helper_call"}
+                or _writes_decided_column(decision, write)
+                or (write.derived and not decision.columns)
             ):
                 continue
 

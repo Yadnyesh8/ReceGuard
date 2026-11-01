@@ -78,14 +78,16 @@ class Connection:
 
     def execute(self, sql: str, params: tuple | dict | None = None) -> list[tuple]:
         with self.raw.cursor() as cur:
-            cur.execute(sql, params or ())
+            # None, not (): with any params object psycopg parses `%`, so a
+            # `LIKE 'a%'` or `id % 2` in a config-authored check_sql would raise.
+            cur.execute(sql, params or None)
             if cur.description is None:
                 return []
             return list(cur.fetchall())
 
     def columns(self, sql: str, params: tuple | dict | None = None) -> list[str]:
         with self.raw.cursor() as cur:
-            cur.execute(sql, params or ())
+            cur.execute(sql, params or None)
             return [d[0] for d in (cur.description or [])]
 
     def commit(self) -> None:
@@ -125,6 +127,7 @@ def create_template(
     template: str = TEMPLATE_DB,
     timeout_s: int = 300,
     driver: str | None = None,
+    extensions: tuple[str, ...] = (),
 ) -> str:
     """Create the template database and run migrations against it exactly once."""
     with connect(admin_url, autocommit=True) as conn:
@@ -132,6 +135,13 @@ def create_template(
         conn.execute(f"CREATE DATABASE {quote_ident(template)}")
 
     template_url = with_database(admin_url, template)
+
+    # Extensions are per database. They go in the template, before the
+    # migration that may need them, so every trial clone inherits them.
+    if extensions:
+        with connect(template_url, autocommit=True) as conn:
+            for name in extensions:
+                conn.execute(f"CREATE EXTENSION IF NOT EXISTS {quote_ident(name)}")
 
     if migrate_command:
         environment = command_environment(
@@ -286,16 +296,22 @@ def seed(url: str, rows_by_table: dict[str, list[dict]]) -> None:
 
 
 def _resync_sequence(conn: Connection, table: str) -> None:
-    try:
-        conn.execute(
-            "SELECT setval(pg_get_serial_sequence(%s, 'id'), "
-            "GREATEST((SELECT COALESCE(MAX(id), 0) FROM "
-            + quote_ident(table)
-            + "), 1)) WHERE pg_get_serial_sequence(%s, 'id') IS NOT NULL",
-            (table, table),
-        )
-    except Exception:  # noqa: BLE001 - table may have no id column at all
-        pass
+    # Looked up rather than tried and caught. A failed statement aborts the
+    # transaction, and the commit after it silently rolls back every seed row,
+    # so a table keyed on anything but `id` started every trial empty.
+    if not conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s AND column_name = 'id'",
+        (table,),
+    ):
+        return
+    conn.execute(
+        "SELECT setval(pg_get_serial_sequence(%s, 'id'), "
+        "GREATEST((SELECT COALESCE(MAX(id), 0) FROM "
+        + quote_ident(table)
+        + "), 1)) WHERE pg_get_serial_sequence(%s, 'id') IS NOT NULL",
+        (table, table),
+    )
 
 
 def snapshot(url: str, tables: list[str], limit: int = 50) -> dict:

@@ -301,9 +301,12 @@ class Governor:
         if not self.respect_rate_limit_headers or snapshot.limit is None:
             return
         if snapshot.limit < concurrency:
-            raise GovernorRefusal(
+            self.stopped_reason = (
                 f"target advertises a rate limit of {snapshot.limit} but this target is "
-                f"configured to fire {concurrency} concurrent requests",
+                f"configured to fire {concurrency} concurrent requests"
+            )
+            raise GovernorRefusal(
+                self.stopped_reason,
                 hint=(
                     "lower the target's concurrency below the advertised limit, or "
                     "verify against an ephemeral instance instead of this one"

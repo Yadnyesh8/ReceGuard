@@ -62,6 +62,10 @@ raceguard:
 # needs the docker:dind service and a privileged runner. Runs only on merge
 # requests, only for targets whose handler changed, and inside a wall clock
 # budget so it cannot outlast the pipeline.
+#
+# Set `mode: inprocess` in raceguard.yaml and install your app in this job: the
+# app runs here, and only its database runs in docker:dind. Container mode
+# publishes the app on the daemon's loopback, which this job cannot reach.
 raceguard:verify:
   extends: .raceguard:install
   stage: test

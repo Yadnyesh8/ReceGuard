@@ -128,15 +128,22 @@ def register(mcp, runtime: Runtime) -> None:
     def _scan(path: Path) -> ScanResult:
         from ..scanner import ScanOptions
         from ..scanner import scan as run_scan
+        from ..scanner.suppress import suppressions_from
 
         root = sandbox.anchor(path)
         cache = root / ".raceguard" / "cache"
+        config_path = sandbox.find_config(root)
+        try:
+            config = load_config(str(config_path)) if config_path else None
+        except RaceGuardError:
+            config = None  # a broken config must not stop a read-only scan
         return run_scan(
             [str(path)],
             ScanOptions(
                 min_confidence=Confidence.low,
                 cache_dir=cache if _writable(cache) else None,
                 root=root,
+                config_suppressions=suppressions_from(config),
             ),
         )
 
@@ -295,7 +302,10 @@ def register(mcp, runtime: Runtime) -> None:
         resolved = _sandboxed(path)
         if isinstance(resolved, ToolError):
             return resolved
-        runs = sandbox.anchor(resolved) / ".raceguard" / "runs"
+        try:
+            runs = sandbox.resolve(sandbox.anchor(resolved) / ".raceguard" / "runs")
+        except SandboxViolation as exc:
+            return ToolError(error=str(exc))
         match = next(
             (
                 d
@@ -309,6 +319,10 @@ def register(mcp, runtime: Runtime) -> None:
             return ToolError(error=f"no run {run_id!r} under {runs}")
         files: dict[str, object] = {}
         for file in sorted(match.iterdir()):
+            # A run folder is checkout content on a hosted server. The jail is
+            # on resolved paths, so a symlink here must not read out of it.
+            if file.is_symlink():
+                continue
             if file.suffix == ".json":
                 try:
                     files[file.name] = json.loads(file.read_text(encoding="utf-8"))

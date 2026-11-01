@@ -22,6 +22,7 @@ from pathlib import Path
 import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
 
+from .. import __version__ as TOOL_VERSION
 from ..contracts import Confidence, Finding, ScanResult
 from .dataflow import analyze_handler
 from .matchers import (
@@ -38,7 +39,6 @@ from .suppress import (
     parse_inline,
 )
 
-CACHE_VERSION = "1"
 DEFAULT_EXCLUDES = (
     ".git",
     ".venv",
@@ -120,7 +120,7 @@ class ParseCache:
 
     def _key(self, source: str, path: Path) -> str:
         digest = hashlib.sha1(
-            f"{CACHE_VERSION}|{self.salt}|{path.as_posix()}|{source}".encode()
+            f"{TOOL_VERSION}|{self.salt}|{path.as_posix()}|{source}".encode()
         ).hexdigest()
         return digest
 
@@ -319,7 +319,9 @@ def scan(
     # any handler is analysed. Without this every table resolves to a guessed
     # snake_case plural and the harness seeds the wrong table.
     global_models = _collect_model_facts(files)
-    cache.salt = _facts_digest(global_models)
+    # A file's findings also depend on what other files say about it: its
+    # models, and the include_router prefix that composes its routes.
+    cache.salt = _facts_digest(global_models, external_prefixes)
 
     for path in files:
         try:
@@ -517,11 +519,12 @@ def _collect_model_facts(files: Sequence[Path]) -> ModuleFacts:
     return facts
 
 
-def _facts_digest(facts: ModuleFacts) -> str:
+def _facts_digest(facts: ModuleFacts, prefixes: dict[str, str]) -> str:
     payload = json.dumps(
         {
             "tables": sorted(facts.table_of_model.items()),
             "unique": sorted((t, sorted(k)) for t, k in facts.unique_keys.items()),
+            "prefixes": sorted(prefixes.items()),
         },
         sort_keys=True,
     )

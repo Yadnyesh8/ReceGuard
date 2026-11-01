@@ -83,7 +83,11 @@ def detect(ctx: RuleContext) -> list[Finding]:
 
 
 def _consumption_column(decision, write) -> str | None:
-    candidates = list(write.columns) + list(decision.columns)
+    # The write has to consume something. `if not user.is_active: raise` then
+    # `user.name = body.name` tests a state word and flips nothing; deleting
+    # the row is the one write that consumes it without naming a column.
+    deletes = write.site is not None and write.site.construct in {"orm_delete", "delete"}
+    candidates = list(write.columns) + (list(decision.columns) if deletes else [])
     for name in candidates:
         lowered = name.lower()
         if any(word in lowered for word in _CONSUMPTION_WORDS):

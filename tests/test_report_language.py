@@ -149,5 +149,11 @@ def test_footer_states_the_asymmetry():
 
 
 def test_two_phase_explains_why_natural_was_skipped():
-    rendered = text_report.render_two_phase(_clean_verdict(), None, colour=False)
+    verdict = _clean_verdict().model_copy(update={"amplified": True, "amplify_ms": 25})
+    rendered = text_report.render_two_phase(verdict, None, colour=False)
     assert "natural phase skipped" in rendered
+
+
+def test_a_natural_only_run_is_not_labelled_amplified():
+    rendered = text_report.render_two_phase(_clean_verdict(), None, colour=False)
+    assert "amplified phase" not in rendered

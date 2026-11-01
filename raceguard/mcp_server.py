@@ -6,12 +6,12 @@ keep working for hosts configured against the old module path.
 
 from __future__ import annotations
 
-from .mcp.server import SDK_MAJOR, build, main
+from .mcp.server import build, main
 from .mcp.settings import MCPSettings
 
 mcp, _runtime = build(MCPSettings.from_env())
 
-__all__ = ["SDK_MAJOR", "main", "mcp"]
+__all__ = ["main", "mcp"]
 
 if __name__ == "__main__":
     main()

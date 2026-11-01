@@ -1,19 +1,16 @@
 # RaceGuard itself, for CI users who would rather not install Python tooling.
 #
-# This image needs access to a Docker socket to do its job, which is a real
-# privilege. Mount it deliberately:
+#   docker run --rm -v "$PWD:/src:ro" -w /src ghcr.io/yadnyesh8/receguard scan .
 #
-#   docker run --rm \
-#     -v /var/run/docker.sock:/var/run/docker.sock \
-#     -v "$PWD:/src:ro" -w /src \
-#     ghcr.io/yadnyesh8/receguard scan .
-#
-# `scan` needs no socket at all. Only `verify` and `fix --apply` do.
+# `verify` and `fix --apply` do not run from this image. They execute your
+# migrate command, which needs your app's own tools, and reach the app and its
+# database through the host. Install raceguard-cli[harness] beside the app.
 #
 # The same image hosts the MCP server:
 #
 #   docker run --rm -p 8765:8765 -e RACEGUARD_MCP_TRANSPORT=http \
 #     -e RACEGUARD_MCP_HOST=0.0.0.0 -e RACEGUARD_MCP_TOKENS=s3cret:verify \
+#     -e RACEGUARD_MCP_VERIFY=false \
 #     -v "$PWD:/src" ghcr.io/yadnyesh8/receguard mcp serve
 
 FROM python:3.12-slim AS build
@@ -34,11 +31,6 @@ LABEL org.opencontainers.image.title="RaceGuard" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.source="https://github.com/Yadnyesh8/ReceGuard"
 
-# Just the docker CLI binary, so container mode can talk to a mounted socket.
-# `apt-get install docker.io` drags in the whole daemon and roughly triples the
-# image; this image is a client and never runs a daemon.
-COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
-
 RUN apt-get update \
     && apt-get install --no-install-recommends -y git \
     && rm -rf /var/lib/apt/lists/*
@@ -49,8 +41,6 @@ RUN WHEEL="$(ls /tmp/raceguard_cli-*.whl)" \
     && pip install --no-cache-dir "${WHEEL}[harness,mcp]" \
     && rm -f /tmp/*.whl
 
-# Runs unprivileged. Add the user to the host's docker group at run time when
-# container mode is needed.
 RUN useradd --create-home --shell /bin/bash raceguard
 USER raceguard
 WORKDIR /src

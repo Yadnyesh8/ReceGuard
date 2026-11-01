@@ -84,7 +84,6 @@ def start_postgres(
     image: str = "postgres:17-alpine",
     *,
     run_id: str,
-    extensions: tuple[str, ...] = (),
 ) -> ContainerHandle:
     """Start one PostgreSQL container for this run, labelled for cleanup.
 
@@ -94,9 +93,7 @@ def start_postgres(
     external = os.environ.get("RACEGUARD_DATABASE_URL")
     if external:
         # Used by CI and by the test suite when a database already exists.
-        handle = ContainerHandle(url=to_sync_url(external), run_id=run_id, external=True)
-        _ensure_extensions(handle.url, extensions)
-        return handle
+        return ContainerHandle(url=to_sync_url(external), run_id=run_id, external=True)
 
     try:
         from testcontainers.postgres import PostgresContainer
@@ -125,7 +122,6 @@ def start_postgres(
     url = to_sync_url(container.get_connection_url())
     handle = ContainerHandle(url=url, container=container, run_id=run_id)
     _wait_ready(url)
-    _ensure_extensions(url, extensions)
     return handle
 
 
@@ -141,11 +137,3 @@ def _wait_ready(url: str, timeout_s: float = 60.0) -> None:
             last = exc
             time.sleep(0.25)
     raise InfrastructureError(f"database never became ready within {timeout_s}s: {last!r}")
-
-
-def _ensure_extensions(url: str, extensions: tuple[str, ...]) -> None:
-    if not extensions:
-        return
-    with connect(url, autocommit=True) as conn:
-        for name in extensions:
-            conn.execute(f"CREATE EXTENSION IF NOT EXISTS {quote_ident(name)}")

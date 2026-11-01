@@ -24,7 +24,14 @@ from pathlib import Path
 from .. import __version__ as TOOL_VERSION
 from ..config import Config, find_config, load_config
 from ..contracts import Confidence, Finding, ScanResult, Verdict
-from ..errors import EXIT_CONFIG, EXIT_FINDINGS, EXIT_INFRA, EXIT_OK, RaceGuardError
+from ..errors import (
+    EXIT_CONFIG,
+    EXIT_FINDINGS,
+    EXIT_INFRA,
+    EXIT_OK,
+    RaceGuardError,
+    UsageError,
+)
 from ..report import codequality as codequality_report
 from ..report import json as json_report
 from ..report import sarif as sarif_report
@@ -96,6 +103,12 @@ class CIResult:
 def run(options: CIOptions) -> CIResult:
     context = providers.detect(options.env, forced=options.provider)
     root = Path(options.path).resolve()
+    # Both of these would otherwise look like a result: a typo'd path scans
+    # nothing and passes, and a bad threshold crashes as exit 1, "findings".
+    if not root.is_dir():
+        raise UsageError(f"{options.path!r} is not a directory")
+    if options.fail_on != "never" and options.fail_on not in set(Confidence):
+        raise UsageError(f"fail-on must be high, medium, low or never, not {options.fail_on!r}")
 
     base = options.base or context.base_ref
     changed, notice = providers.changed_files(base, cwd=root)
@@ -106,13 +119,17 @@ def run(options: CIOptions) -> CIResult:
     if notice:
         notices.append(notice)
     if changed_only and not changed:
-        if base:
-            notices.append("changed-only requested but the diff is empty; gating on every file")
-        else:
+        if not base:
             notices.append("changed-only requested with no diff base; gating on every file")
-        changed_only = False
+            changed_only = False
+        elif notice is None:
+            # The diff worked and touched nothing here, the usual case for one
+            # service in a monorepo. A failed diff already fell back above.
+            notices.append(f"nothing changed under {options.path}; nothing to gate")
+        else:
+            changed_only = False
 
-    scan = _scan(options, root)
+    scan = _scan(options, root, notices)
     result = CIResult(
         provider=context,
         scan=scan,
@@ -135,6 +152,9 @@ def run(options: CIOptions) -> CIResult:
     _write_outputs(result, options, root)
     _speak_to_provider(result, options)
 
+    for error in scan.errors:
+        result.notices.append(f"not scanned: {error}")
+
     if options.comment:
         result.comment = post_sticky(context, result.summary_markdown)
         if not result.comment.posted:
@@ -150,15 +170,33 @@ def run(options: CIOptions) -> CIResult:
 # --------------------------------------------------------------------------
 
 
-def _scan(options: CIOptions, root: Path) -> ScanResult:
+def _scan(options: CIOptions, root: Path, notices: list[str]) -> ScanResult:
     from ..scanner import ScanOptions
     from ..scanner import scan as run_scan
+    from ..scanner.suppress import suppressions_from
 
-    result = run_scan([str(root)], ScanOptions(min_confidence=Confidence.low, root=root))
-    if options.hygiene:
+    config = None
+    config_path = find_config(root)
+    if config_path is not None:
+        try:
+            config = load_config(str(config_path))
+        except RaceGuardError as exc:
+            notices.append(f"config not usable, scanning without it: {exc.message}")
+
+    result = run_scan(
+        [str(root)],
+        ScanOptions(
+            min_confidence=Confidence.low,
+            root=root,
+            config_suppressions=suppressions_from(config),
+        ),
+    )
+    if options.hygiene and (config is None or config.hygiene.enabled):
         from ..hygiene import check
 
-        result.hygiene = check([str(root)], root=root)
+        result.hygiene = check(
+            [str(root)], rules=config.hygiene.rules if config else None, root=root
+        )
     return result
 
 
@@ -225,7 +263,7 @@ def _verify(result: CIResult, options: CIOptions, root: Path, base: str | None) 
         )
     except RaceGuardError as exc:
         result.notices.append(f"verification aborted: {exc.message}")
-        result.exit_code = EXIT_INFRA
+        result.exit_code = exc.exit_code
 
 
 def _run_targets(
@@ -285,10 +323,11 @@ def findings_by_target(config: Config, findings) -> dict[str, str]:
         if finding.route:
             by_route.setdefault(finding.route, []).append(finding)
     for target in config.targets:
-        for finding in by_route.get(target.route or "", []):
-            rank = finding.confidence.rank()
-            if target.id not in best or rank > best[target.id][0]:
-                best[target.id] = (rank, finding.id)
+        for route in target.routes:
+            for finding in by_route.get(route, []):
+                rank = finding.confidence.rank()
+                if target.id not in best or rank > best[target.id][0]:
+                    best[target.id] = (rank, finding.id)
     return {target_id: finding_id for target_id, (_, finding_id) in best.items()}
 
 
@@ -308,7 +347,7 @@ def targets_in_diff(config: Config, findings, touched: set[str]) -> list[str]:
     changed_routes = {f.route for f in findings if f.read_site.file in touched and f.route}
     selected: list[str] = []
     for target in config.targets:
-        if target.route and target.route in changed_routes:
+        if changed_routes.intersection(target.routes):
             selected.append(target.id)
         elif target.handler and _handler_file(target.handler) in touched:
             selected.append(target.id)

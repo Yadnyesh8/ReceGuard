@@ -103,3 +103,17 @@ class ConfigSuppression:
         if self.file:
             return file.replace("\\", "/").endswith(self.file.replace("\\", "/"))
         return True
+
+
+def suppressions_from(config) -> list[ConfigSuppression]:
+    """The ``suppress:`` block of a loaded config, or nothing without one.
+
+    Every entry point that scans goes through this, so a suppression recorded
+    in raceguard.yaml means the same in `scan`, `ci`, `fix` and the MCP server.
+    """
+    if config is None:
+        return []
+    return [
+        ConfigSuppression(rule=s.rule, reason=s.reason, handler=s.handler, file=s.file)
+        for s in config.suppress
+    ]

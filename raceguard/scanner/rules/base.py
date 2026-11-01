@@ -158,7 +158,8 @@ def decision_between(read: Site, write: Write, analysis: HandlerAnalysis) -> Dec
     """The decision on the path: after the read, before the write, same taint."""
     best: Decision | None = None
     for decision in analysis.decisions:
-        if not (read.seq < decision.seq < write.seq):
+        # <=: in `if db.query(X).first():` the read IS the decision's test.
+        if not (read.seq <= decision.seq < write.seq):
             continue
         for name in decision.tainted_names:
             taint = analysis.taints.get(name)

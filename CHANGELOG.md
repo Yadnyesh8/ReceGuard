@@ -24,14 +24,65 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   prompts, tool annotations and drain-on-shutdown. `raceguard.mcp_server` stays
   as a shim.
 
+### Changed
+
+- The scanner reports `lost_update` only when the stored value depends on the
+  row, and `duplicate_insert` only when the insert runs on the path where the
+  row was absent. Renames, deletes and child inserts no longer fail the default
+  gate. Rule output is keyed on the tool version, so caches refresh on upgrade.
+- The natural phase always runs every trial. It used to stop on a hit, which
+  inflated the rate it exists to report, and it now takes longer.
+- With `--changed-only`, a diff that touches nothing under the scanned path
+  gates nothing, instead of gating on every file. A failed diff still does.
+- `database.extensions` are created in the template, so trials inherit them.
+- The `mcp` extra needs SDK 2.1 or later. The SDK v1 path crashed at startup.
+
 ### Security
 
+- `--allow-external-target` now compares the host you type. Any value was
+  accepted, and `allow_external_target: true` alone was enough. A burst at an
+  external target is now capped by the ceiling as documented.
+- The app under test is published on loopback only.
+- `get_run` and `raceguard://runs` no longer follow symlinks out of the sandbox.
 - `verify_handler` over HTTP now requires the `verify` token scope. Scopes were
   parsed but never checked, so a read-only token could run project code. Add
   `:verify` to any token that should keep verifying.
 
 ### Fixed
 
+- Amplification sleeps after the read, not before it, on every SQLAlchemy engine
+  including async ones, and a run where it never fired is reported as natural
+  timing. It used to attach only to modules named `shop`, `app` or `src` and
+  claim an amplified run regardless.
+- `inprocess` mode no longer reimports a project-local `.venv`, which failed
+  every trial, and reports an app crash as a 500 rather than as infrastructure.
+- Seeding a table with no `id` column no longer rolls back every seed row.
+- `check_sql` may contain `%`.
+- `raceguard verify --no-amplify` no longer crashes.
+- `raceguard scan` takes several paths, which the pre-commit hook has always
+  passed. A missing path, or a bad `--fail-on`, `--min-confidence` or `--format`,
+  is exit 2 rather than a clean pass or a traceback reported as exit 1.
+- `raceguard fix --apply` exits 1 when a patch is rejected, and reverifies against
+  the matched target's own invariant.
+- `raceguard ci` gates correctly on a subdirectory of a repository: paths from
+  `git diff` never matched findings, so nothing in the diff was gated.
+- `raceguard.yaml` suppressions apply in `ci`, `fix`, `baseline` and the MCP
+  server, not only `scan`. `ci` also honours the `hygiene` block.
+- A run started on Docker-in-Docker or a remote daemon is no longer refused as
+  an external target.
+- `run_budget_s` and advertised rate limits are enforced, a governor stop ends
+  the run instead of erroring every remaining trial, and backpressure pauses
+  once per trial rather than once per response.
+- `single_packet` over plain http runs `last_byte` and says so. It used to send
+  the burst sequentially and report the race as not reproduced.
+- `start` honours shell quoting, and the amplification shim no longer replaces
+  the image's own `PYTHONPATH`.
+- `raceguard verify` reports the targets that finished when a later one fails,
+  rather than discarding them.
+- Three of the reference app's five races could not be verified:
+  `/coupons/redeem` returned 500 on every request, `/teams/{id}/members` hung on
+  an engine shared across event loops, and the `transfer` target's identical
+  requests could never break its own check.
 - `--allow-anonymous` no longer returns 401 when a reverse proxy forwards its
   `Authorization` header.
 - The per-client verify cap is a rolling window (`RACEGUARD_MCP_SESSION_WINDOW`,

@@ -170,6 +170,8 @@ def render_two_phase(amplified: Verdict, natural: Verdict | None, *, colour: boo
     entered. The natural number is the operational claim: this is how often it
     fired unaided. One blended figure would be a different, and false, claim.
     """
+    if natural is None and not amplified.amplified:
+        return render_verdict(amplified, colour=colour)  # --no-amplify: one phase ran
     c = Palette(colour)
     parts = [
         c("amplified phase (does the window exist?)", BOLD),

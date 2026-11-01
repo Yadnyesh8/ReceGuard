@@ -49,6 +49,7 @@ class RunContext:
     container: ContainerHandle
     trial_databases: list[str] = field(default_factory=list)
     app_image: str | None = None
+    started: float = field(default_factory=time.monotonic)
 
     def ensure_app_image(self) -> str | None:
         """Build the application image once, on first use."""
@@ -69,14 +70,17 @@ class RunContext:
         self.container.stop()
 
 
-def start_run(config: Config, *, run_id: str | None = None) -> RunContext:
-    """Start the container, build the template, and arm the governor."""
+def start_run(
+    config: Config, *, run_id: str | None = None, confirmed_host: str | None = None
+) -> RunContext:
+    """Start the container, build the template, and arm the governor.
+
+    ``confirmed_host`` is the host name a person typed. It comes from the
+    command line only, never from config, or the confirmation would be a
+    setting someone can leave switched on.
+    """
     run_id = run_id or uuid.uuid4().hex
-    container = start_postgres(
-        config.database.image,
-        run_id=run_id,
-        extensions=tuple(config.database.extensions),
-    )
+    container = start_postgres(config.database.image, run_id=run_id)
 
     # Everything after the container is up must run under a guard that stops
     # it on failure. An ownership refusal or a broken migrate command would
@@ -94,11 +98,15 @@ def start_run(config: Config, *, run_id: str | None = None) -> RunContext:
             external_target=config.governor.allow_external_target,
             external_concurrency_ceiling=config.governor.external_concurrency_ceiling,
         )
-        Governor.check_target_ownership(
-            container.url,
-            allow_external=config.governor.allow_external_target,
-            confirmed_host=_hostname(container.url),
-        )
+        # A container this run started is ours wherever Docker publishes it: a
+        # remote daemon or Docker-in-Docker hands back a host that is not
+        # loopback. Only a supplied URL needs the question asked.
+        if container.external:
+            Governor.check_target_ownership(
+                container.url,
+                allow_external=config.governor.allow_external_target,
+                confirmed_host=confirmed_host,
+            )
 
         template_url = db.create_template(
             container.url,
@@ -108,6 +116,7 @@ def start_run(config: Config, *, run_id: str | None = None) -> RunContext:
             env=config.app.env,
             template=config.database.template_name,
             driver=config.app.database_url_driver,
+            extensions=tuple(config.database.extensions),
         )
     except BaseException:
         with suppress(Exception):
@@ -124,12 +133,6 @@ def start_run(config: Config, *, run_id: str | None = None) -> RunContext:
     )
     _install_signal_handlers(context)
     return context
-
-
-def _hostname(url: str) -> str:
-    from urllib.parse import urlparse
-
-    return urlparse(url).hostname or ""
 
 
 def _install_signal_handlers(context: RunContext) -> None:
@@ -161,6 +164,8 @@ async def run_trial(
     sync: SyncStrategy,
     amplify_ms: int,
     timeout_s: int,
+    notes: list[str],
+    hits: list[int],
 ) -> TrialRecord:
     config = context.config
     record = TrialRecord(index=index, concurrency=concurrency)
@@ -199,11 +204,15 @@ async def run_trial(
 
         record.status_codes = result.status_codes
         record.arrival_spread_ms = round(result.arrival_spread_ms, 3)
+        notes.extend(n for n in result.notes if n not in notes)
+        if result.amplifier_hits is not None:
+            hits.append(result.amplifier_hits)
 
         for headers in result.headers:
             snapshot = context.governor.observe(headers)
             if snapshot.exhausted:
                 record.error = "target reported its rate limit as exhausted"
+            context.governor.check_advertised_limit(snapshot, concurrency)
 
         paired = zip(
             result.status_codes,
@@ -212,7 +221,10 @@ async def run_trial(
         )
         for code, headers in paired:
             if code in (429, 503):
+                # Once per trial: one pause covers the whole burst, and waiting
+                # again for each response would multiply it by the concurrency.
                 await context.governor.backpressure(code, headers)
+                break
 
         if result.errors and not result.status_codes:
             record.error = "; ".join(result.errors[:3])
@@ -251,6 +263,7 @@ async def _fire_against_app(
     timeout_s: int,
 ):
     config = context.config
+    state = None
     async with AsyncExitStack() as stack:
         if mode == "inprocess":
             if not config.app.module:
@@ -269,10 +282,10 @@ async def _fire_against_app(
                     timeout_s=timeout_s,
                 )
             )
-            if amplify_ms > 0 and booted.engine is not None:
+            if amplify_ms > 0:
                 from .amplify import amplified
 
-                stack.enter_context(amplified(booted.engine, amplify_table, amplify_ms))
+                state = stack.enter_context(amplified(amplify_table, amplify_ms))
         else:
             booted = await stack.enter_async_context(
                 boot_container(
@@ -293,7 +306,7 @@ async def _fire_against_app(
                 )
             )
 
-        return await fire(
+        result = await fire(
             sync,
             requests,
             client=booted.client,
@@ -301,6 +314,22 @@ async def _fire_against_app(
             health_path=config.app.health_path,
             timeout_s=timeout_s,
         )
+        result.notes.extend(booted.notes)
+        if state is not None:
+            result.amplifier_hits = state.hits
+        return result
+
+
+def _stop_reason(context: RunContext, target_started: float, budget_s: int) -> str | None:
+    """Why the next trial must not run, if anything."""
+    if context.governor.stopped_reason:
+        return context.governor.stopped_reason
+    if time.perf_counter() - target_started > budget_s:
+        return f"per target budget of {budget_s}s exhausted"
+    run_budget_s = context.config.defaults.run_budget_s
+    if time.monotonic() - context.started > run_budget_s:
+        return f"run budget of {run_budget_s}s exhausted"
+    return None
 
 
 def _port_of(base_url: str) -> int:
@@ -380,22 +409,27 @@ async def verify_target(
     use_amplify = settings["amplify"] if amplify is None else amplify
     amplify_ms = settings["amplify_ms"] if use_amplify else 0
     if config.governor.allow_external_target:
-        # An external target never gets the amplification shim installed.
+        # An external target never gets the amplification shim installed, and
+        # the ceiling must bound the burst itself, which acquire() does not.
         amplify_ms = 0
+        concurrency = min(concurrency, config.governor.external_concurrency_ceiling)
+    if mode == "inprocess" and sync != "barrier":
+        raise TargetConfigError(
+            f"target {target.id!r}: sync {sync!r} opens real sockets, which inprocess mode "
+            f"does not have",
+            hint="use sync: barrier, or mode: container",
+        )
 
     started = time.perf_counter()
     budget_s = settings["target_budget_s"]
     records: list[TrialRecord] = []
+    trial_notes: list[str] = []
+    amplifier_hits: list[int] = []
 
     for index in range(trials):
-        if time.perf_counter() - started > budget_s:
-            records.append(
-                TrialRecord(
-                    index=index,
-                    concurrency=concurrency,
-                    error=f"per target budget of {budget_s}s exhausted",
-                )
-            )
+        stop = _stop_reason(context, started, budget_s)
+        if stop:
+            records.append(TrialRecord(index=index, concurrency=concurrency, error=stop))
             break
         records.append(
             await run_trial(
@@ -408,15 +442,30 @@ async def verify_target(
                 sync=sync,
                 amplify_ms=amplify_ms,
                 timeout_s=settings["trial_timeout_s"],
+                notes=trial_notes,
+                hits=amplifier_hits,
             )
         )
-        # One violating trial is a proof. Keep going only far enough to give
-        # the rate meaning, rather than burning the budget after the answer.
-        if records[-1].violated and len(records) >= max(5, trials // 4):
+        # One violating trial is a proof, so the amplified phase stops once the
+        # rate means something. The natural phase never stops early: its rate is
+        # the number being reported, and stopping on a hit would inflate it.
+        if amplify_ms and records[-1].violated and len(records) >= max(5, trials // 4):
             break
 
+    # Only inprocess mode can observe the shim. A delay that never fired must
+    # not be reported as if it had: an app with no SQLAlchemy engine, or an
+    # amplify_table that matches nothing, ran on natural timing.
+    amplifier_missed = bool(amplify_ms and amplifier_hits and not any(amplifier_hits))
+    if amplifier_missed:
+        trial_notes.append(
+            f"WARNING: amplification was requested but no read of "
+            f"{target.amplify_table or invariant.table!r} went through a SQLAlchemy "
+            f"engine, so this run used natural timing. Check amplify_table."
+        )
+        amplify_ms = 0
+
     stats = summarise(records)
-    notes = list(stats.notes)
+    notes = [*stats.notes, *trial_notes]
 
     if not any(any(200 <= c < 300 for c in r.status_codes) for r in records):
         # Distinguish "your payload is wrong" from "nothing ever ran". When
@@ -503,7 +552,7 @@ async def verify_target(
 
 
 async def verify_two_phase(
-    context: RunContext, target: Target, invariant: Invariant, **kwargs
+    context: RunContext, target: Target, invariant: Invariant, *, amplify: bool = True, **kwargs
 ) -> tuple[Verdict, Verdict | None]:
     """Run the amplified phase, then the natural one. Never merge them.
 
@@ -511,7 +560,12 @@ async def verify_two_phase(
     exploitable. The natural verdict is the operational claim: this is how
     often it fired with no help. Collapsing them into one number is how an
     honest tool becomes an alarming one.
+
+    ``amplify=False`` runs the natural phase alone; the verdict comes back
+    first, with ``amplified`` False on it.
     """
+    if not amplify:
+        return await verify_target(context, target, invariant, amplify=False, **kwargs), None
     amplified_verdict = await verify_target(context, target, invariant, amplify=True, **kwargs)
     if not amplified_verdict.violated:
         return amplified_verdict, None

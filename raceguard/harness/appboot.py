@@ -18,13 +18,17 @@ docs.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
@@ -45,12 +49,19 @@ INPROCESS_WARNING = (
 )
 
 
+_INSTALLED = frozenset({"site-packages", "dist-packages"})
+
+# inprocess mode rewrites os.environ and sys.modules, and both are global. Two
+# concurrent verifies (RACEGUARD_MCP_MAX_VERIFIES above 1) take turns instead
+# of each running against the other's database.
+_INPROCESS_LOCK = threading.Lock()
+
+
 @dataclass
 class BootedApp:
     client: httpx.AsyncClient
     base_url: str
     mode: str
-    engine: Any = None  # the app's SQLAlchemy engine, when reachable
     thread_pool_size: int | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -76,6 +87,10 @@ def _reload_app_modules(module_path: str, source_root: Path) -> Any:
     package = module_name.split(".")[0]
 
     for name, module in list(sys.modules.items()):
+        # raceguard is the caller. Reimporting it mid-run would orphan its own
+        # exception classes.
+        if name == "raceguard" or name.startswith("raceguard."):
+            continue
         # Drop by NAME as well as by path. Dropping only what lives under the
         # current source root leaves a module of the same name imported earlier
         # from a DIFFERENT checkout sitting in sys.modules, and the harness then
@@ -89,7 +104,12 @@ def _reload_app_modules(module_path: str, source_root: Path) -> Any:
         if not origin or origin in {"built-in", "frozen"}:
             continue
         try:
-            if root in Path(origin).resolve().parents:
+            resolved = Path(origin).resolve()
+            # A virtualenv usually lives inside the project. Its packages are
+            # dependencies, not the app: reimporting SQLAlchemy beside live
+            # objects from the old copy fails every trial with a TypeError that
+            # names neither of them.
+            if root in resolved.parents and not _INSTALLED.intersection(resolved.parts):
                 del sys.modules[name]
         except (OSError, ValueError):
             continue
@@ -115,42 +135,6 @@ def _reload_app_modules(module_path: str, source_root: Path) -> Any:
             f"{module_name!r} has no attribute {attribute!r}",
             hint='app.module looks like "package.main:app"',
         ) from exc
-
-
-def find_engine(app: Any) -> Any:
-    """Locate the app's SQLAlchemy engine so the amplifier can attach to it."""
-    from sqlalchemy.engine import Engine
-
-    # A tuple of the engine classes to match, so an absent async extra simply
-    # narrows what we look for rather than rebinding a class name to ().
-    engine_types: tuple[type, ...] = (Engine,)
-    try:
-        from sqlalchemy.ext.asyncio import AsyncEngine
-
-        engine_types = (Engine, AsyncEngine)
-    except ImportError:  # pragma: no cover - sqlalchemy without the async extra
-        pass
-
-    seen: set[int] = set()
-    candidates = [app, sys.modules.get(getattr(app, "__module__", "") or "")]
-    for module_name, module in list(sys.modules.items()):
-        if module_name.startswith(("shop", "app", "src")) or ".db" in module_name:
-            candidates.append(module)
-
-    for candidate in candidates:
-        if candidate is None or id(candidate) in seen:
-            continue
-        seen.add(id(candidate))
-        for name in dir(candidate):
-            if name.startswith("__"):
-                continue
-            try:
-                value = getattr(candidate, name)
-            except Exception:  # noqa: BLE001
-                continue
-            if isinstance(value, engine_types):
-                return value
-    return None
 
 
 def detect_thread_pool_size(app: Any) -> int | None:
@@ -185,6 +169,7 @@ async def boot_inprocess(
     concurrency: int = 8,
     timeout_s: float = 30.0,
 ) -> AsyncIterator[BootedApp]:
+    await asyncio.to_thread(_INPROCESS_LOCK.acquire)
     previous = dict(os.environ)
     os.environ[database_url_env] = database_url
     os.environ.update(env or {})
@@ -194,7 +179,9 @@ async def boot_inprocess(
 
     try:
         app = _reload_app_modules(module_path, source_root)
-        transport = httpx.ASGITransport(app=app)
+        # A crash stays a 500, as it would over a socket. Raised here it reaches
+        # the trial as a transport error and looks like broken infrastructure.
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
         limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=concurrency)
         client = httpx.AsyncClient(
             transport=transport,
@@ -206,7 +193,6 @@ async def boot_inprocess(
             client=client,
             base_url="http://raceguard.test",
             mode="inprocess",
-            engine=find_engine(app),
             thread_pool_size=detect_thread_pool_size(app),
             notes=[INPROCESS_WARNING],
         )
@@ -223,6 +209,7 @@ async def boot_inprocess(
     finally:
         os.environ.clear()
         os.environ.update(previous)
+        _INPROCESS_LOCK.release()
 
 
 # --------------------------------------------------------------------------
@@ -364,25 +351,27 @@ async def boot_container(
             "1g",
             "--cpus",
             "2",
+            # Loopback only: this app is deliberately racy and its database
+            # is throwaway, so nothing else on the network should reach it.
             "-p",
-            f"{port}:{port}",
+            f"127.0.0.1:{port}:{port}",
             "--add-host",
             "host.docker.internal:host-gateway",
             "-e",
             f"{database_url_env}={container_url}",
         ]
+        env = dict(env or {})
         if shim_dir is not None:
-            command += [
-                "-v",
-                f"{shim_dir}:/rgshim:ro",
-                "-e",
-                "PYTHONPATH=/rgshim",
-            ]
-        for key, value in (env or {}).items():
+            # Prepended, never replaced: the amplified run must import the same
+            # code as the natural one.
+            existing = env.get("PYTHONPATH") or _image_pythonpath(image)
+            env["PYTHONPATH"] = f"/rgshim:{existing}" if existing else "/rgshim"
+            command += ["-v", f"{shim_dir}:/rgshim:ro"]
+        for key, value in env.items():
             command += ["-e", f"{key}={value}"]
         command.append(image)  # type: ignore[arg-type]
         if start_command:
-            command += start_command.split()
+            command += shlex.split(start_command)
 
         result = subprocess.run(command, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
@@ -410,6 +399,24 @@ async def boot_container(
             entered.__exit__(None, None, None)
         if shim_dir is not None:
             shutil.rmtree(shim_dir, ignore_errors=True)
+
+
+def _image_pythonpath(image: str | None) -> str:
+    """The PYTHONPATH the image's own Dockerfile set, if any."""
+    if not image:
+        return ""
+    result = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{json .Config.Env}}", image],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    for entry in json.loads(result.stdout) or []:
+        key, _, value = entry.partition("=")
+        if key == "PYTHONPATH":
+            return value
+    return ""
 
 
 def _reachable_from_container(url: str) -> str:
@@ -449,6 +456,4 @@ async def _wait_healthy(
 
 
 async def _sleep(seconds: float) -> None:
-    import asyncio
-
     await asyncio.sleep(seconds)

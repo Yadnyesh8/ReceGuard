@@ -170,3 +170,118 @@ def test_patch_closes_the_race(shop):
                 sys.path.remove(str(work))
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+
+
+# -- what the harness promises about the database --------------------------
+
+
+@pytest.fixture
+def scratch(context):
+    from raceguard.db import connect, create_trial_database, drop_trial_database
+
+    _config, run = context
+    name, url = create_trial_database(run.admin_url, 998)
+    with connect(url, autocommit=True) as conn:
+        conn.execute("CREATE TABLE codes (code text PRIMARY KEY, used boolean NOT NULL)")
+    yield url
+    drop_trial_database(run.admin_url, name)
+
+
+def test_seed_survives_a_table_with_no_id_column(scratch):
+    """Probing for an `id` sequence used to abort the transaction, and the
+    commit after it rolled back every seed row without a word."""
+    from raceguard.db import connect, seed
+
+    seed(scratch, {"codes": [{"code": "A", "used": False}]})
+    with connect(scratch) as conn:
+        assert conn.execute("SELECT count(*) FROM codes") == [(1,)]
+
+
+def test_check_sql_may_contain_a_percent_sign(scratch):
+    from raceguard.db import check_invariant, seed
+
+    seed(scratch, {"codes": [{"code": "A1", "used": False}]})
+    violated, _ = check_invariant(scratch, "SELECT 1 FROM codes WHERE code LIKE 'A%'")
+    assert violated
+
+
+def test_extensions_reach_every_trial_database(context):
+    from raceguard.db import connect, create_template, create_trial_database, drop_trial_database
+
+    _config, run = context
+    create_template(
+        run.admin_url,
+        migrate_command=None,
+        cwd=".",
+        database_url_env="DATABASE_URL",
+        template="rg_ext_template",
+        extensions=("citext",),
+    )
+    name, url = create_trial_database(run.admin_url, 997, template="rg_ext_template")
+    try:
+        with connect(url) as conn:
+            rows = conn.execute("SELECT count(*) FROM pg_extension WHERE extname = 'citext'")
+        assert rows == [(1,)]
+    finally:
+        drop_trial_database(run.admin_url, name)
+        drop_trial_database(run.admin_url, "rg_ext_template")
+
+
+def test_no_amplify_runs_the_natural_phase_alone(context):
+    config, run = context
+    target = config.target("purchase")
+    invariant = derive_for_target(
+        config, target, admin_url=run.admin_url, template=config.database.template_name
+    )
+    verdict, second = asyncio.run(
+        verify_two_phase(run, target, invariant, amplify=False, trials=2)
+    )
+    assert second is None
+    assert verdict.amplified is False
+
+
+def test_inprocess_amplification_fires_on_an_async_engine(context):
+    """The reference app builds its engine at import, so the old search could
+    find it. What matters is that the claim on the verdict is true."""
+    config, run = context
+    target = config.target("purchase")
+    invariant = derive_for_target(
+        config, target, admin_url=run.admin_url, template=config.database.template_name
+    )
+    verdict = asyncio.run(verify_target(run, target, invariant, trials=2, amplify=True))
+    assert verdict.amplified is True
+    assert not any(n.startswith("WARNING") for n in verdict.notes)
+
+
+@pytest.mark.parametrize(
+    "target_id", ["purchase", "transfer", "coupon_redeem", "signup", "team_join"]
+)
+def test_every_reference_race_reproduces(context, target_id):
+    """The README promises five. A target that stops reproducing is usually the
+    target or the app breaking, not the race going away."""
+    config, run = context
+    target = config.target(target_id)
+    invariant = derive_for_target(
+        config, target, admin_url=run.admin_url, template=config.database.template_name
+    )
+    verdict = asyncio.run(verify_target(run, target, invariant, trials=5, amplify=True))
+    assert verdict.violated
+
+
+def test_container_mode_end_to_end(shop):
+    """The default mode. It builds the app image, boots it beside the database,
+    injects the shim and fires real HTTP, none of which inprocess touches."""
+    config = load_config(str(shop / "raceguard.yaml"))
+    assert config.defaults.mode == "container"
+    run = start_run(config)
+    try:
+        target = config.target("purchase")
+        invariant = derive_for_target(
+            config, target, admin_url=run.admin_url, template=config.database.template_name
+        )
+        amplified, natural = asyncio.run(verify_two_phase(run, target, invariant, trials=5))
+    finally:
+        run.cleanup()
+    assert amplified.mode == "container"
+    assert amplified.violated and amplified.amplified
+    assert natural is not None and not natural.amplified

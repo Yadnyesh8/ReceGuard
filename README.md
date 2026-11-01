@@ -94,15 +94,12 @@ pip install "raceguard-cli[mcp]"      # + the MCP server
 Or without installing Python tooling at all:
 
 ```bash
-# scan needs no Docker socket
 docker run --rm -v "$PWD:/src:ro" -w /src ghcr.io/yadnyesh8/receguard scan .
-
-# verify does; mount it deliberately
-docker run --rm \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$PWD:/src" -w /src \
-  ghcr.io/yadnyesh8/receguard verify --target purchase
 ```
+
+The image runs `scan`, `ci` without `--verify`, and a scan-only MCP server.
+`verify` is not supported from inside it: the migrate command needs your app's
+own tools, which are not in the image. Install with the `harness` extra instead.
 
 ### In CI
 

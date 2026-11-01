@@ -14,6 +14,7 @@ from pathlib import Path
 from ..config import load_config
 from ..errors import RaceGuardError
 from .runtime import Runtime
+from .sandbox import SandboxViolation
 
 
 def _docs_dir() -> Path:
@@ -53,7 +54,10 @@ def register(mcp, runtime: Runtime) -> None:
     @mcp.resource("raceguard://runs/{run_id}", mime_type="application/json")
     def run_resource(run_id: str) -> str:
         """Artifacts of one recorded CLI run: verdicts, invariants, patches, config."""
-        runs = sandbox.root / ".raceguard" / "runs"
+        try:
+            runs = sandbox.resolve(sandbox.root / ".raceguard" / "runs")
+        except SandboxViolation as exc:
+            return json.dumps({"error": str(exc)})
         match = next(
             (
                 d
@@ -66,6 +70,8 @@ def register(mcp, runtime: Runtime) -> None:
             return json.dumps({"error": f"no run {run_id!r} under {runs}"})
         out: dict[str, object] = {}
         for file in sorted(match.glob("*.json")):
+            if file.is_symlink():
+                continue
             try:
                 out[file.stem] = json.loads(file.read_text(encoding="utf-8"))
             except (OSError, ValueError):

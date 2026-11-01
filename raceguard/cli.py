@@ -41,6 +41,7 @@ from .errors import (
     EXIT_INTERRUPTED,
     EXIT_OK,
     RaceGuardError,
+    UsageError,
 )
 from .report import html as html_report
 from .report import json as json_report
@@ -139,6 +140,26 @@ def _load(path: str | None, start: str = ".") -> Config:
     return load_config(path, start=start)
 
 
+def _level(value: str, option: str, *, allow_never: bool = False) -> None:
+    """Refuse a bad threshold up front. Left to raise, it exits 1, "findings"."""
+    allowed = [c.value for c in Confidence] + (["never"] if allow_never else [])
+    if value not in allowed:
+        raise UsageError(f"{option} must be one of {', '.join(allowed)}, not {value!r}")
+
+
+def _output_format(value: str, allowed: tuple[str, ...]) -> None:
+    if value not in allowed:
+        raise UsageError(f"--format must be one of {', '.join(allowed)}, not {value!r}")
+
+
+def _config_near(path: Path) -> Config | None:
+    """The config for a directory, when it has a usable one."""
+    try:
+        return _load(None, start=str(path)) if find_config(path) else None
+    except RaceGuardError:
+        return None
+
+
 # --------------------------------------------------------------------------
 # scan
 # --------------------------------------------------------------------------
@@ -146,7 +167,9 @@ def _load(path: str | None, start: str = ".") -> Config:
 
 @app.command()
 def scan(
-    path: str = typer.Argument(".", help="File or directory to scan."),
+    paths: list[str] = typer.Argument(
+        None, help="Files or directories to scan. pre-commit passes several."
+    ),
     format: str = typer.Option("text", "--format", "-f", help="text | json | sarif | html"),
     min_confidence: str = typer.Option("medium", "--min-confidence", help="high | medium | low"),
     show_suppressed: bool = typer.Option(False, "--show-suppressed"),
@@ -160,21 +183,26 @@ def scan(
     """Static scan for read-modify-write windows. No Docker required."""
     from .scanner import ScanOptions
     from .scanner import scan as run_scan
-    from .scanner.suppress import ConfigSuppression
+    from .scanner.suppress import suppressions_from
 
+    paths = paths or ["."]
+    _level(min_confidence, "--min-confidence")
+    _level(fail_on, "--fail-on", allow_never=True)
+    _output_format(format, ("text", "json", "sarif", "html"))
+    # A path that is not there scans zero files, and zero files reads as clean.
+    missing = [p for p in paths if not Path(p).exists()]
+    if missing:
+        raise UsageError(f"no such file or directory: {', '.join(missing)}")
+
+    path = paths[0]
     root = Path(path if Path(path).is_dir() else Path(path).parent).resolve()
-    run = Run.start(Path.cwd(), f"raceguard scan {path}")
+    run = Run.start(Path.cwd(), f"raceguard scan {' '.join(paths)}")
     _configure_logging(verbose, run.id)
 
-    suppressions: list[ConfigSuppression] = []
     loaded: Config | None = None
     try:
         if config or find_config(path):
             loaded = _load(config, start=path)
-            suppressions = [
-                ConfigSuppression(rule=s.rule, reason=s.reason, handler=s.handler, file=s.file)
-                for s in loaded.suppress
-            ]
             root = loaded.root.resolve()
     except RaceGuardError as exc:
         console.print(f"[yellow]config not usable, scanning without it: {exc.message}[/]")
@@ -182,17 +210,17 @@ def scan(
     options = ScanOptions(
         min_confidence=Confidence(min_confidence),
         show_suppressed=show_suppressed,
-        config_suppressions=suppressions,
+        config_suppressions=suppressions_from(loaded),
         cache_dir=None if no_cache else _writable_cache(),
         root=root,
     )
-    result = run_scan([path], options)
+    result = run_scan(paths, options)
 
     if hygiene:
         from .hygiene import check as hygiene_check
 
         rules = loaded.hygiene.rules if loaded and loaded.hygiene.enabled else None
-        result.hygiene = hygiene_check([path], rules=rules, root=root)
+        result.hygiene = hygiene_check(paths, rules=rules, root=root)
 
     rendered = _render_scan(result, format, run.id)
     _emit(rendered, output)
@@ -270,6 +298,7 @@ def verify(
     from .harness import start_run, verify_two_phase
     from .synth import derive_for_target
 
+    _output_format(format, ("text", "json", "html"))
     cfg = _load(config)
     run = Run.start(cfg.root, "raceguard verify")
     _configure_logging(verbose, run.id)
@@ -292,9 +321,10 @@ def verify(
             "no targets defined", hint="run `raceguard init` to generate them from a scan"
         )
 
-    context = start_run(cfg)
+    context = start_run(cfg, confirmed_host=allow_external_target)
     verdicts: list[Verdict] = []
     rendered_parts: list[str] = []
+    failure: RaceGuardError | None = None
     try:
         for entry in targets:
             invariant = derive_for_target(
@@ -309,7 +339,7 @@ def verify(
                     invariant,
                     trials=trials,
                     concurrency=concurrency,
-                    **({"amplify": False} if no_amplify else {}),
+                    amplify=not no_amplify,
                 )
             )
             verdicts.append(amplified)
@@ -319,6 +349,8 @@ def verify(
                 text_report.render_two_phase(amplified, natural, colour=out.is_terminal)
             )
         run.write_json("governor.json", context.governor.stats.as_dict())
+    except RaceGuardError as exc:
+        failure = exc  # raised below, after the targets that did finish are reported
     finally:
         context.cleanup()
 
@@ -332,6 +364,8 @@ def verify(
 
     run.write_json("verdicts.json", [v.model_dump(mode="json") for v in verdicts])
     run.write("config.resolved.json", jsonlib.dumps(cfg.redacted(), indent=2))
+    if failure is not None:
+        raise failure
     raise typer.Exit(EXIT_FINDINGS if any(v.violated for v in verdicts) else EXIT_OK)
 
 
@@ -363,6 +397,7 @@ def fix(
     from .patch import apply_patch, propose
     from .scanner import ScanOptions
     from .scanner import scan as run_scan
+    from .scanner.suppress import suppressions_from
     from .synth import from_config
 
     cfg = _load(config)
@@ -373,20 +408,27 @@ def fix(
         _fix_hygiene(rule, cfg, run, apply=apply)
         raise typer.Exit(EXIT_OK)
 
-    result = run_scan([str(cfg.root)], ScanOptions(min_confidence=Confidence.medium, root=cfg.root))
+    result = run_scan(
+        [str(cfg.root)],
+        ScanOptions(
+            min_confidence=Confidence.medium,
+            root=cfg.root,
+            config_suppressions=suppressions_from(cfg),
+        ),
+    )
     findings = result.findings
     if finding:
         findings = [f for f in findings if f.id == finding]
     elif target:
-        entry = cfg.target(target)
-        route = entry.route
-        findings = [f for f in findings if f.route == route]
+        routes = cfg.target(target).routes
+        findings = [f for f in findings if f.route in routes]
     if not findings:
         console.print("[yellow]nothing to fix: no matching finding above medium confidence[/]")
         raise typer.Exit(EXIT_OK)
 
     invariants = {t.invariant.table: from_config(t) for t in cfg.targets if t.invariant}
     patches = []
+    rejected = 0
     for item in findings:
         invariant = next((invariants.get(t) for t in item.tables if t in invariants), None)
         patch = propose(item, invariant, root=cfg.root)
@@ -404,7 +446,11 @@ def fix(
             # it would mean claiming a fix that was never re-tested, which is
             # the one thing this tool must not do.
             matched: Target | None = _target_for_finding(cfg, item)
-            invariant = invariants.get(item.tables[0]) if item.tables else None
+            # The target's own invariant first. The table lookup holds one
+            # invariant per table, so with two targets on one table a patch
+            # could be signed off against the other target's check.
+            if matched is not None and matched.invariant:
+                invariant = from_config(matched)
             reverify = None
             if matched is not None:
                 # The patch's own migration is applied to the reverify template
@@ -416,6 +462,7 @@ def fix(
                     "patch cannot be reverified. Applying it would mean claiming a fix "
                     "that was never re-tested; add a target and try again.[/]"
                 )
+                rejected += 1
                 continue
 
             result_apply = apply_patch(
@@ -438,6 +485,7 @@ def fix(
                     )
                     out.print(patch.migration.statement, soft_wrap=True)
             else:
+                rejected += 1
                 console.print(
                     f"[red]not applied: step '{result_apply.failed_step}' failed, so "
                     f"the change was discarded[/]\n{result_apply.output[:2000]}"
@@ -447,12 +495,13 @@ def fix(
         console.print(
             "[dim]nothing was written. Re-run with --apply to apply, reverify, and test.[/]"
         )
-    raise typer.Exit(EXIT_OK)
+    # The race is still in the tree. A script must not read this as success.
+    raise typer.Exit(EXIT_FINDINGS if rejected else EXIT_OK)
 
 
 def _target_for_finding(cfg: Config, finding) -> Target | None:
     for entry in cfg.targets:
-        if entry.route and entry.route == finding.route:
+        if finding.route in entry.routes:
             return entry
     return None
 
@@ -547,6 +596,7 @@ def report(
     output: str | None = typer.Option(None, "--output", "-o"),
 ) -> None:
     """Re-render a stored run."""
+    _output_format(format, ("text", "html", "json"))
     root = Path.cwd()
     runs = sorted((root / RUNS_DIR).glob("*")) if (root / RUNS_DIR).is_dir() else []
     if not runs:
@@ -607,7 +657,7 @@ def clean(
     # carry, including one that is happening right now in another terminal.
     # Killing a live run's database mid-trial produces a confusing connection
     # error in that other window, so say so before doing it.
-    if not force:
+    if not force and shutil.which("docker"):
         live = subprocess.run(
             ["docker", "ps", "-q", "--filter", "label=raceguard.run"],
             capture_output=True,
@@ -815,9 +865,17 @@ def baseline_write(
     from .ci.baseline import Baseline
     from .scanner import ScanOptions
     from .scanner import scan as run_scan
+    from .scanner.suppress import suppressions_from
 
     root = Path(path).resolve()
-    result = run_scan([str(root)], ScanOptions(min_confidence=Confidence.low, root=root))
+    result = run_scan(
+        [str(root)],
+        ScanOptions(
+            min_confidence=Confidence.low,
+            root=root,
+            config_suppressions=suppressions_from(_config_near(root)),
+        ),
+    )
     written = Baseline.from_findings(result.findings).write(root / output)
     out.print(f"wrote {written} with {len(result.findings)} fingerprint(s)")
     console.print(
@@ -836,10 +894,19 @@ def baseline_check(
     from .ci.baseline import Baseline
     from .scanner import ScanOptions
     from .scanner import scan as run_scan
+    from .scanner.suppress import suppressions_from
 
+    _level(fail_on, "--fail-on", allow_never=True)
     root = Path(path).resolve()
     accepted = Baseline.load(root / baseline)
-    result = run_scan([str(root)], ScanOptions(min_confidence=Confidence.low, root=root))
+    result = run_scan(
+        [str(root)],
+        ScanOptions(
+            min_confidence=Confidence.low,
+            root=root,
+            config_suppressions=suppressions_from(_config_near(root)),
+        ),
+    )
     threshold = Confidence(fail_on).rank() if fail_on != "never" else 99
     new = [
         f

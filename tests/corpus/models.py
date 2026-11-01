@@ -43,6 +43,8 @@ class Item(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
+    sku = Column(String)
+    owner_id = Column(Integer)
     stock = Column(Integer, nullable=False, default=0)
     version = Column(Integer, nullable=False, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow)
@@ -57,6 +59,9 @@ class Account(Base):
 
     id = Column(Integer, primary_key=True)
     owner = Column(String, nullable=False)
+    name = Column(String)
+    tier = Column(String, default="free")
+    active = Column(Boolean, default=True)
     balance = Column(Numeric, nullable=False, default=0)
     version = Column(Integer, nullable=False, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow)

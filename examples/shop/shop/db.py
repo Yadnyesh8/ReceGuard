@@ -20,9 +20,6 @@ DATABASE_URL = os.environ.get(
 
 engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 
-# Exported directly (not just via the FastAPI dependency) because shop/routes/teams.py
-# opens its own session: its handler is a plain `def`, so it cannot use Depends(get_session)
-# the way the async handlers do. See the docstring on teams.add_team_member.
 async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
 

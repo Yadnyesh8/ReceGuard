@@ -118,7 +118,10 @@ def changed_files(base_ref: str | None, *, cwd: Path | None = None) -> tuple[set
     for spec in (f"{base_ref}...HEAD", base_ref):
         try:
             result = subprocess.run(
-                ["git", "diff", "--name-only", spec],
+                # --relative: git prints paths from the repository root, while
+                # findings are relative to the scanned directory. In a monorepo
+                # the two never matched, so nothing in the diff ever gated.
+                ["git", "diff", "--name-only", "--relative", spec],
                 capture_output=True,
                 text=True,
                 timeout=60,

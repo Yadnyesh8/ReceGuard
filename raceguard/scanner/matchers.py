@@ -137,7 +137,7 @@ def _is_dynamic_string(node: cst.BaseExpression) -> bool:
     return False
 
 
-def _collect_calls(node: cst.CSTNode) -> list[cst.Call]:
+def collect_calls(node: cst.CSTNode) -> list[cst.Call]:
     found: list[cst.Call] = []
 
     class _V(cst.CSTVisitor):
@@ -276,7 +276,7 @@ def guards_on_call(call: cst.Call) -> set[str]:
     if attrs & {"on_conflict_do_nothing", "on_conflict_do_update"}:
         found.add(GUARD_ON_CONFLICT)
 
-    for inner in _collect_calls(call):
+    for inner in collect_calls(call):
         name = dotted(inner.func)
         tail = name.rsplit(".", 1)[-1]
         if tail == "with_for_update":
@@ -312,7 +312,7 @@ def guards_on_call(call: cst.Call) -> set[str]:
 
 def _atomic_values(call: cst.Call) -> bool:
     """``update(Item).values(stock=Item.stock - qty)``: the DB does the arithmetic."""
-    for inner in [call, *_collect_calls(call)]:
+    for inner in [call, *collect_calls(call)]:
         func = inner.func
         if not (isinstance(func, cst.Attribute) and func.attr.value == "values"):
             continue
@@ -331,7 +331,7 @@ def _atomic_values(call: cst.Call) -> bool:
 
 def _version_predicate(call: cst.Call) -> bool:
     """``.where(Item.id == id, Item.version == seen)`` is an optimistic guard."""
-    for inner in [call, *_collect_calls(call)]:
+    for inner in [call, *collect_calls(call)]:
         func = inner.func
         if not (
             isinstance(func, cst.Attribute) and func.attr.value in {"where", "filter", "filter_by"}
@@ -385,7 +385,7 @@ def classify_call(call: cst.Call, line: int, end_line: int) -> Site:
         _annotate(call, site)
         return site
 
-    if method in READ_METHODS or any(name in READ_METHODS for name in chain):
+    if _is_read(method, chain, call):
         # A chain like session.query(Item).with_for_update().first() is a read
         # that already carries its guard.
         if any(name in _WRITE_CONSTRUCTS for name in chain):
@@ -415,6 +415,22 @@ def classify_call(call: cst.Call, line: int, end_line: int) -> Site:
 
     _annotate(call, site)
     return site
+
+
+def _is_read(method: str, chain: list[str], call: cst.Call) -> bool:
+    """``get`` is the one read name that is also every mapping's method, so it
+    counts only in its ORM forms: ``session.get(Item, id)`` and
+    ``query(Item).get(id)``. ``payload.get("name")`` reads no database."""
+    if method == "get":
+        return "query" in chain or _names_a_model(call)
+    return any(name in READ_METHODS and name != "get" for name in [method, *chain])
+
+
+def _names_a_model(call: cst.Call) -> bool:
+    if not call.args:
+        return False
+    name = dotted(call.args[0].value).rsplit(".", 1)[-1]
+    return name[:1].isupper() and name not in _KNOWN_NON_MODELS
 
 
 def _narrow_ambiguous(call: cst.Call, site: Site) -> None:
@@ -483,13 +499,13 @@ def _annotate(call: cst.Call, site: Site) -> None:
     site.columns = column_names(call)
     # ``update(Item).values(stock=new_stock)`` names the written column as a
     # keyword, not as an attribute, so column_names alone never sees it.
-    for inner in [call, *_collect_calls(call)]:
+    for inner in [call, *collect_calls(call)]:
         func = inner.func
         if isinstance(func, cst.Attribute) and func.attr.value in {"values", "filter_by"}:
             for arg in inner.args:
                 if arg.keyword is not None and arg.keyword.value not in site.columns:
                     site.columns.append(arg.keyword.value)
-    for inner in [call, *_collect_calls(call)]:
+    for inner in [call, *collect_calls(call)]:
         name = dotted(inner.func).rsplit(".", 1)[-1]
         if name in {"text", "exec_driver_sql"} and inner.args:
             if _is_dynamic_string(inner.args[0].value):
@@ -500,7 +516,7 @@ def _annotate(call: cst.Call, site: Site) -> None:
 
 def is_isolation_serializable(node: cst.CSTNode) -> bool:
     """``create_engine(..., isolation_level="SERIALIZABLE")`` or a session variant."""
-    for call in _collect_calls(node) or []:
+    for call in collect_calls(node) or []:
         for arg in call.args:
             if arg.keyword is not None and arg.keyword.value in {
                 "isolation_level",

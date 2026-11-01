@@ -41,6 +41,10 @@ def detect(ctx: RuleContext) -> list[Finding]:
             decision = decision_between(read, write, ctx.analysis)
             if decision is None or not decision.is_existence:
                 continue
+            # Loading a parent row and creating a child is not create-if-absent:
+            # past `if user is None: raise`, the row is known to exist.
+            if not decision.row_absent_at(write.seq):
+                continue
 
             # An insert whose commit is wrapped in `except IntegrityError` is
             # the claim-first shape: the constraint, not the lookup, decides.

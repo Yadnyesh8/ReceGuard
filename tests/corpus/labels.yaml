@@ -523,3 +523,152 @@ fixtures:
     tables: [team_members, teams]
     invariant_kind: aggregate_limit
     why: "Textbook count-then-insert aggregate_limit shape, made safe only because the handler is enqueued onto a per-team single-consumer queue the scanner cannot see into; suppressed with a named reason rather than silently cleared."
+
+  # ---------------------------------------------------------------------
+  # Plain CRUD. The safe fixtures above are all guarded, so on their own they
+  # cannot measure the false positive that matters most: the ordinary handler
+  # with no guard because it needs none. These keep the default gate usable.
+  # ---------------------------------------------------------------------
+  - file: safe/crud_child_of_loaded_parent.py
+    handler: create_note
+    route: "POST /items/{item_id}/orders"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: null
+    why: "Loading a parent row and creating a child is the most common handler there is. Past the 404 the row is known to exist, so this is not create-if-absent."
+  - file: safe/crud_blind_rename.py
+    handler: rename_item
+    route: "PATCH /items/{item_id}"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: null
+    why: "The stored value comes from the request and does not depend on the row. Concurrent renames are last-write-wins, which is what a client asked for, not a lost update."
+  - file: safe/crud_delete_after_404.py
+    handler: delete_item
+    route: "DELETE /items/{item_id}"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: null
+    why: "Deleting a row that was loaded for a 404 check loses nothing; a second delete finds nothing."
+  - file: safe/crud_owner_check_then_edit.py
+    handler: edit_item
+    route: "PUT /items/{item_id}"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: null
+    why: "An authorization test on one column followed by a write to another. The write does not depend on the value tested racing with anything."
+  - file: safe/crud_threshold_on_other_column.py
+    handler: relabel_item
+    route: "POST /items/{item_id}/label"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: null
+    why: "A threshold on one column gates a write to a different one, so nothing about the compared value is consumed."
+  - file: safe/crud_state_word_not_consumed.py
+    handler: rename_account
+    route: "POST /accounts/{account_id}/name"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: null
+    why: "A state word in the test, but nothing is flipped: the write touches another column."
+  - file: safe/crud_request_dict_get.py
+    handler: create_from_payload
+    route: "POST /signups/raw"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [signups]
+    invariant_kind: null
+    why: "payload.get() is a dict lookup, not a database read."
+  - file: safe/crud_inline_exists_with_unique.py
+    handler: signup_unique
+    route: "POST /unique-signups"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [unique_signups]
+    invariant_kind: null
+    why: "An inline existence test, with the unique constraint doing the real work."
+  - file: safe/crud_update_keyed_on_read.py
+    handler: relabel_by_id
+    route: "POST /items/{item_id}/sku"
+    vulnerable: false
+    pattern: null
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [items]
+    invariant_kind: null
+    why: "The read value appears only in the WHERE clause. The value stored is the request's, so nothing derived is overwritten."
+  - file: vulnerable/duplicate_insert_inline_exists.py
+    handler: follow_inline
+    route: "POST /follows/inline"
+    vulnerable: true
+    pattern: duplicate_insert
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [follows]
+    invariant_kind: null
+    why: "The existence test is on a read that never got a name. Two requests both see nothing and both insert."
+  - file: vulnerable/duplicate_insert_absent_branch.py
+    handler: follow_branch
+    route: "POST /follows/branch"
+    vulnerable: true
+    pattern: duplicate_insert
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [follows]
+    invariant_kind: null
+    why: "The insert sits inside the branch that saw no row."
+  - file: vulnerable/lost_update_computed_into_values.py
+    handler: credit
+    route: "POST /accounts/{account_id}/credit"
+    vulnerable: true
+    pattern: lost_update
+    expected_confidence: medium
+    guard: null
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: null
+    why: "The stored value is computed from the read, then written through update().values()."
+  - file: vulnerable/lost_update_check_and_flip_same_column.py
+    handler: publish
+    route: "POST /accounts/{account_id}/tier"
+    vulnerable: true
+    pattern: lost_update
+    expected_confidence: high
+    guard: null
+    guard_partial: null
+    tables: [accounts]
+    invariant_kind: null
+    why: "The written value is a constant, but a test of that same column chose it, so two requests can both act on the old value."

@@ -46,6 +46,13 @@ def detect(ctx: RuleContext) -> list[Finding]:
             # A threshold decision is oversell's territory, not this rule's.
             if decision is not None and decision.is_threshold:
                 continue
+            # Nothing is lost unless the written value depended on the row:
+            # either computed from it, or chosen by a test of the same column.
+            # This is what keeps a rename, a delete and a child insert out.
+            if not (
+                write.derived or write.kind == "helper_call" or _decides_column(decision, write)
+            ):
+                continue
             # An existence test followed by an insert is duplicate_insert.
             if decision is not None and decision.is_existence and write.kind == "call":
                 if write.site is not None and write.site.construct in {"insert", "orm_add"}:
@@ -68,3 +75,7 @@ def detect(ctx: RuleContext) -> list[Finding]:
             )
             break
     return findings
+
+
+def _decides_column(decision, write) -> bool:
+    return decision is not None and bool(set(decision.columns) & set(write.columns))

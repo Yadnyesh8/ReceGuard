@@ -27,13 +27,14 @@ export RACEGUARD_MCP_TOKENS="s3cret:verify,readonly-token"
 raceguard mcp serve --transport http --host 0.0.0.0 --port 8765 --project-root /srv/app
 ```
 
-or, from the container image:
+or, scan-only, from the container image, which cannot verify because your app's
+dependencies are not in it:
 
 ```
 docker run --rm -p 8765:8765 \
   -e RACEGUARD_MCP_TRANSPORT=http -e RACEGUARD_MCP_HOST=0.0.0.0 \
-  -e RACEGUARD_MCP_TOKENS=s3cret:verify -e RACEGUARD_MCP_ROOT=/src \
-  -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" \
+  -e RACEGUARD_MCP_TOKENS=s3cret -e RACEGUARD_MCP_ROOT=/src \
+  -e RACEGUARD_MCP_VERIFY=false -v "$PWD:/src:ro" \
   ghcr.io/yadnyesh8/receguard mcp serve
 ```
 

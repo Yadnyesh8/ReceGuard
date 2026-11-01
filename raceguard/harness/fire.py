@@ -62,6 +62,9 @@ class FireResult:
     arrival_spread_ms: float = 0.0
     sync: SyncStrategy = "barrier"
     duration_s: float = 0.0
+    notes: list[str] = field(default_factory=list)
+    # None when unknown: only inprocess mode can see the shim fire.
+    amplifier_hits: int | None = None
 
     @property
     def any_success(self) -> bool:
@@ -230,15 +233,20 @@ async def fire_single_packet(
     one TCP packet. Requires the h2 extra; without it this degrades to last
     byte sync rather than silently pretending it synchronised.
     """
-    try:
-        import h2  # noqa: F401
-    except ImportError:
-        log.warning(
-            "single_packet needs HTTP/2 support (pip install 'httpx[http2]'); "
-            "falling back to last_byte, which is the HTTP/1.1 equivalent"
-        )
+    reason = None
+    if urlparse(base_url).scheme != "https":
+        # This client negotiates HTTP/2 over TLS. Over http:// it speaks HTTP/1.1,
+        # and on one connection the requests run one after another: no race, and
+        # a clean "not reproduced".
+        reason = "this target is plain http"
+    else:
+        try:
+            import h2  # noqa: F401
+        except ImportError:
+            reason = "the h2 package is missing (pip install 'httpx[http2]')"
+    if reason:
         result = await fire_last_byte(base_url, requests, timeout_s=timeout_s, pause_s=pause_s)
-        result.errors.append("single_packet unavailable (no h2), used last_byte instead")
+        result.notes.append(f"single_packet was not possible, so last_byte ran: {reason}")
         return result
 
     result = FireResult(sync="single_packet")

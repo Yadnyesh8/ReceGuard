@@ -56,24 +56,30 @@ targets:
     concurrency: 2
     trials: 30
 
-  # conservation -- two accounts, one transfer amount equal to the entire
-  # sender balance, so a lost update either overdraws the sender or double
-  # credits the receiver and the pair's total stops summing to 50.
+  # conservation -- one sender, two recipients, and enough for both transfers,
+  # so the only way the three accounts stop summing to 100 is a lost debit.
   - id: transfer
-    route: "POST /wallet/transfer"
     handler: "shop/routes/wallet.py::transfer"
-    spec: "a transfer must never change the total balance held across the two accounts"
-    payload: { from_id: 1, to_id: 2, amount: 50 }
+    spec: "a transfer must never change the total balance held across the accounts"
+    # Two recipients, not one. Identical transfers both write the same two
+    # balances, so the sum holds while 50 is spent twice. Sending to different
+    # accounts leaves the second credit standing when the first debit is lost.
+    group:
+      - route: "POST /wallet/transfer"
+        payload: { from_id: 1, to_id: 2, amount: 50 }
+      - route: "POST /wallet/transfer"
+        payload: { from_id: 1, to_id: 3, amount: 50 }
     seed:
       accounts:
-        - { id: 1, owner: "alice", balance: 50 }
+        - { id: 1, owner: "alice", balance: 100 }
         - { id: 2, owner: "bob", balance: 0 }
+        - { id: 3, owner: "carol", balance: 0 }
     invariant:
       kind: conservation
       table: accounts
       column: balance
       key_columns: ["id"]
-      expected_total: 50
+      expected_total: 100
     concurrency: 2
     trials: 30
 

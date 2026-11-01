@@ -22,6 +22,7 @@ from .matchers import (
     Role,
     Site,
     classify_call,
+    collect_calls,
     column_names,
     dotted,
     string_literal,
@@ -64,6 +65,30 @@ class Decision:
     is_threshold: bool  # a comparison against something, not just a None check
     is_existence: bool  # `if x is None` / `if not x` -> create-if-absent shape
     seq: float = 0.0
+    # Which way an existence test points, and the shape of its `if`. Telling
+    # "fail unless it exists" from "fail if it already exists" needs both.
+    absent_when_true: bool | None = None
+    body_lines: tuple[int, int] | None = None
+    else_lines: tuple[int, int] | None = None
+    body_exits: bool = False
+
+    def row_absent_at(self, write_seq: float) -> bool:
+        """Can the row this test looked for be missing when the write runs?
+
+        ``if user is None: raise`` guarantees it exists from there on, which is
+        an ordinary load of a parent row. ``if existing: raise`` guarantees it
+        does not, which is create-if-absent. Anything unclear answers True.
+        """
+        if self.absent_when_true is None:
+            return True
+        line = int(write_seq)
+        if self.body_lines and self.body_lines[0] <= line <= self.body_lines[1]:
+            return self.absent_when_true
+        if self.else_lines and self.else_lines[0] <= line <= self.else_lines[1]:
+            return not self.absent_when_true
+        if self.body_exits:
+            return not self.absent_when_true
+        return True
 
 
 @dataclass
@@ -79,6 +104,10 @@ class Write:
     decrement: bool = False
     guards: set[str] = field(default_factory=set)
     seq: float = 0.0
+    # The value stored was computed from the value read. Without this a write
+    # overwrites but cannot lose an update: `item.name = body.name` means the
+    # same whatever the row held, and last-write-wins is what the client asked.
+    derived: bool = False
 
 
 @dataclass
@@ -131,6 +160,7 @@ class HandlerVisitor(cst.CSTVisitor):
         # on the first pass. These keep the second pass from double counting.
         self._seen_writes: set[tuple[int, str]] = set()
         self._seen_decisions: set[int] = set()
+        self._inline_reads: dict[int, str] = {}
 
     # -- position helper --------------------------------------------------
 
@@ -217,6 +247,7 @@ class HandlerVisitor(cst.CSTVisitor):
                     kind="call",
                     guards=set(site.guards),
                     seq=self._seq_for(node),
+                    derived=self._call_stores_read_value(site, node),
                 )
             )
         else:
@@ -262,6 +293,7 @@ class HandlerVisitor(cst.CSTVisitor):
                 kind="augassign",
                 seq=self._seq_for(node),
                 decrement=decrement,
+                derived=True,
             )
         )
 
@@ -289,6 +321,7 @@ class HandlerVisitor(cst.CSTVisitor):
                         kind="assign_attr",
                         seq=self._seq_for(target),
                         decrement=_is_decrement(value, target),
+                        derived=bool(self._tainted_in(value)),
                     )
                 )
             return
@@ -340,7 +373,24 @@ class HandlerVisitor(cst.CSTVisitor):
     # -- decisions --------------------------------------------------------
 
     def visit_If(self, node: cst.If) -> None:
-        self._record_decision(node.test, "if")
+        self._bind_inline_read(node.test)
+        decision = self._record_decision(node.test, "if")
+        if decision is None:
+            return
+        decision.absent_when_true = _absent_when_true(node.test)
+        decision.body_lines = self._span(node.body)
+        decision.body_exits = _always_exits(node.body)
+        if node.orelse is not None:
+            decision.else_lines = self._span(node.orelse)
+
+    def _bind_inline_read(self, test: cst.BaseExpression) -> None:
+        """`if db.query(X).first():` decides on a read that never got a name."""
+        operand = test.expression if isinstance(test, cst.UnaryOperation) else test
+        origin = self._read_origin(operand)
+        if origin is not None:
+            name = f"<read:{origin.line}>"
+            self.analysis.taints[name] = Taint(name, origin)
+            self._inline_reads[id(test)] = name
 
     def visit_Assert(self, node: cst.Assert) -> None:
         self._record_decision(node.test, "assert")
@@ -351,27 +401,28 @@ class HandlerVisitor(cst.CSTVisitor):
     def visit_While(self, node: cst.While) -> None:
         self._record_decision(node.test, "if")
 
-    def _record_decision(self, test: cst.BaseExpression, kind: str) -> None:
+    def _record_decision(self, test: cst.BaseExpression, kind: str) -> Decision | None:
         tainted = self._tainted_in(test)
-        if not tainted:
-            return
-        if id(test) in self._seen_decisions:
-            return
+        inline = self._inline_reads.get(id(test))
+        if inline:
+            tainted.add(inline)
+        if not tainted or id(test) in self._seen_decisions:
+            return None
         self._seen_decisions.add(id(test))
         start, end = self._span(test)
-        self.analysis.decisions.append(
-            Decision(
-                node=test,
-                line=start,
-                end_line=end,
-                tainted_names=tainted,
-                columns=_attr_names(test),
-                kind=kind,
-                seq=self._seq_for(test),
-                is_threshold=_has_ordering_comparison(test),
-                is_existence=_is_existence_test(test),
-            )
+        decision = Decision(
+            node=test,
+            line=start,
+            end_line=end,
+            tainted_names=tainted,
+            columns=_attr_names(test),
+            kind=kind,
+            seq=self._seq_for(test),
+            is_threshold=_has_ordering_comparison(test),
+            is_existence=bool(inline) or _is_existence_test(test),
         )
+        self.analysis.decisions.append(decision)
+        return decision
 
     # -- retry / isolation detection --------------------------------------
 
@@ -418,6 +469,24 @@ class HandlerVisitor(cst.CSTVisitor):
         self._seen_writes.add(key)
         self.analysis.writes.append(write)
 
+    def _call_stores_read_value(self, site: Site, node: cst.Call) -> bool:
+        """Does an UPDATE store something computed from the read?
+
+        ORM add, delete and merge, and inserts, overwrite nothing. An UPDATE
+        that takes the read value only in its WHERE clause (`Item.id == item.id`)
+        stores the same thing whatever the row held.
+        """
+        if site.construct is None or not site.construct.startswith(("update", "raw_write")):
+            return False
+        values = [
+            inner
+            for inner in collect_calls(node)
+            if isinstance(inner.func, cst.Attribute) and inner.func.attr.value == "values"
+        ]
+        if values:
+            return any(self._tainted_in(arg.value) for call in values for arg in call.args)
+        return bool(self._tainted_in(node))
+
     def _models_of(self, names: set[str]) -> list[str]:
         out: list[str] = []
         for name in names:
@@ -445,6 +514,35 @@ class HandlerVisitor(cst.CSTVisitor):
 # --------------------------------------------------------------------------
 # Free helpers
 # --------------------------------------------------------------------------
+
+
+def _absent_when_true(test: cst.BaseExpression) -> bool | None:
+    """Does this test being true mean the row was NOT found?"""
+    if isinstance(test, cst.UnaryOperation) and isinstance(test.operator, cst.Not):
+        return True
+    if isinstance(test, cst.Comparison) and len(test.comparisons) == 1:
+        target = test.comparisons[0]
+        if isinstance(target.comparator, cst.Name) and target.comparator.value == "None":
+            if isinstance(target.operator, cst.Is):
+                return True
+            if isinstance(target.operator, cst.IsNot):
+                return False
+    if isinstance(test, (cst.Name, cst.Attribute, cst.Call, cst.Await)):
+        return False
+    return None
+
+
+def _always_exits(body: cst.BaseSuite) -> bool:
+    """True when falling out of the end of this block is impossible."""
+    statements = list(body.body)
+    if not statements:
+        return False
+    last = statements[-1]
+    if isinstance(last, cst.SimpleStatementLine):
+        return any(isinstance(small, (cst.Raise, cst.Return)) for small in last.body)
+    if isinstance(last, cst.SimpleStatementSuite):
+        return any(isinstance(small, (cst.Raise, cst.Return)) for small in last.body)
+    return False
 
 
 def _attr_names(node: cst.CSTNode) -> list[str]:
