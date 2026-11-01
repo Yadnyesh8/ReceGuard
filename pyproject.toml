@@ -31,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 harness = [
-  "psycopg[binary]>=3.1",
+  "psycopg[binary]>=3.3.6",
   "asyncpg>=0.29",
   "testcontainers[postgres]>=4.5",
   "docker>=7.1",
