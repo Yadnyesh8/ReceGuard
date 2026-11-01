@@ -8,7 +8,33 @@
       1150,
       560
     ],
-    "visual_preset": "editorial"
+    "visual_preset": "signal-flow",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "Interfaces"
+        },
+        "backend": {
+          "label": "Static analysis"
+        },
+        "messagebus": {
+          "label": "Invariants"
+        },
+        "cloud": {
+          "label": "Runtime"
+        },
+        "database": {
+          "label": "Database"
+        },
+        "security": {
+          "label": "Safety limits"
+        },
+        "external": {
+          "label": "Outside RaceGuard"
+        }
+      }
+    }
   },
   "components": [
     {
@@ -69,7 +95,7 @@
     },
     {
       "id": "synth",
-      "type": "backend",
+      "type": "messagebus",
       "label": "Invariant synth",
       "sublabel": "SQL check for violations",
       "pos": [
@@ -97,7 +123,7 @@
     },
     {
       "id": "harness",
-      "type": "backend",
+      "type": "cloud",
       "label": "Harness",
       "sublabel": "trials, verdict",
       "pos": [
@@ -125,7 +151,7 @@
     },
     {
       "id": "report",
-      "type": "backend",
+      "type": "frontend",
       "label": "Reports",
       "sublabel": "text, SARIF, HTML",
       "pos": [
