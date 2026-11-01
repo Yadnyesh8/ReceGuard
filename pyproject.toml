@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "raceguard"
-version = "0.1.0"
+name = "raceguard-cli"
+dynamic = ["version"]
 description = "Find, prove, and repair atomicity violations in Python HTTP handlers."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,13 +53,24 @@ dev = [
 raceguard = "raceguard.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/raceguard/raceguard"
+Homepage = "https://github.com/Yadnyesh8/ReceGuard"
+
+# One version, one place: the package reads it and the build reads it from
+# the package. Two hardcoded copies drift the first time a release is cut.
+[tool.hatch.version]
+path = "raceguard/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["raceguard"]
 # PEP 561: without this the marker exists in the repo and not in the wheel,
 # so downstream type checkers ignore our annotations entirely.
 artifacts = ["raceguard/py.typed"]
+
+# The MCP server serves these as raceguard://docs/{name}, and its own prompts
+# send agents there. Without this they exist only in a source checkout, so a
+# pip-installed server answered every docs read with an empty list.
+[tool.hatch.build.targets.wheel.force-include]
+"docs" = "raceguard/_docs"
 
 [tool.hatch.build.targets.sdist]
 include = [

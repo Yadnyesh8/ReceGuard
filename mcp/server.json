@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
-  "name": "io.github.raceguard/raceguard",
+  "name": "io.github.yadnyesh8/receguard",
   "description": "Find, prove, and repair read-decide-write races in Python HTTP handlers. Static scan is free; verification boots an ephemeral PostgreSQL and is budgeted.",
   "status": "active",
   "repository": {
-    "url": "https://github.com/raceguard/raceguard",
+    "url": "https://github.com/Yadnyesh8/ReceGuard",
     "source": "github"
   },
   "version_detail": {
@@ -13,7 +13,7 @@
   "packages": [
     {
       "registry_name": "pypi",
-      "name": "raceguard",
+      "name": "raceguard-cli",
       "version": "0.1.0",
       "runtime_hint": "python",
       "package_arguments": [

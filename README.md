@@ -1,8 +1,8 @@
 # RaceGuard
 
-[![CI](https://github.com/raceguard/raceguard/actions/workflows/ci.yml/badge.svg)](https://github.com/raceguard/raceguard/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/raceguard.svg)](https://pypi.org/project/raceguard/)
-[![Python](https://img.shields.io/pypi/pyversions/raceguard.svg)](https://pypi.org/project/raceguard/)
+[![CI](https://github.com/Yadnyesh8/ReceGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/Yadnyesh8/ReceGuard/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/raceguard-cli.svg)](https://pypi.org/project/raceguard-cli/)
+[![Python](https://img.shields.io/pypi/pyversions/raceguard-cli.svg)](https://pypi.org/project/raceguard-cli/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 RaceGuard finds, proves, and repairs atomicity violations in backend HTTP
@@ -43,9 +43,10 @@ report output.
 ## Sixty seconds
 
 ```bash
-pip install "raceguard[harness]"
+pip install "raceguard-cli[harness]"
 
 cd examples/shop
+pip install -e .                      # the app under test: its migrations run on your machine
 raceguard scan .                      # static, no Docker, milliseconds
 raceguard verify --target purchase    # boots PostgreSQL, fires real requests
 raceguard fix --target purchase       # prints a diff, writes nothing
@@ -59,28 +60,28 @@ exactly one buyer wins every time.
 ## Installing
 
 ```bash
-pip install raceguard                 # scan and the hygiene rules
-pip install "raceguard[harness]"      # + dynamic verification (needs Docker)
-pip install "raceguard[mcp]"          # + the MCP server
+pip install raceguard-cli             # scan and the hygiene rules
+pip install "raceguard-cli[harness]"  # + dynamic verification (needs Docker)
+pip install "raceguard-cli[mcp]"      # + the MCP server
 ```
 
 Or without installing Python tooling at all:
 
 ```bash
 # scan needs no Docker socket
-docker run --rm -v "$PWD:/src:ro" -w /src ghcr.io/raceguard/raceguard scan .
+docker run --rm -v "$PWD:/src:ro" -w /src ghcr.io/yadnyesh8/receguard scan .
 
 # verify does; mount it deliberately
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$PWD:/src" -w /src \
-  ghcr.io/raceguard/raceguard verify --target purchase
+  ghcr.io/yadnyesh8/receguard verify --target purchase
 ```
 
 ### In CI
 
 ```yaml
-- uses: raceguard/raceguard@v1
+- uses: Yadnyesh8/ReceGuard@v1
   with:
     path: .
     fail-on: high
@@ -115,7 +116,7 @@ it. See [docs/mcp.md](docs/mcp.md).
 
 ```yaml
 repos:
-  - repo: https://github.com/raceguard/raceguard
+  - repo: https://github.com/Yadnyesh8/ReceGuard
     rev: v0.1.0
     hooks:
       - id: raceguard

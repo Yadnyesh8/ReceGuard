@@ -1,12 +1,12 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
     "python_full_version == '3.14.*'",
     "python_full_version == '3.13.*'",
     "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
+    "python_full_version < '3.12' or (python_full_version == '3.12.*' and sys_platform != 'emscripten')",
 ]
 
 [[package]]
@@ -1647,8 +1647,7 @@ wheels = [
 ]
 
 [[package]]
-name = "raceguard"
-version = "0.1.0"
+name = "raceguard-cli"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -1706,7 +1705,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'" },
     { name = "uvicorn", marker = "extra == 'dev'", specifier = ">=0.30" },
 ]
-provides-extras = ["harness", "mcp", "dev"]
+provides-extras = ["dev", "harness", "mcp"]
 
 [[package]]
 name = "referencing"

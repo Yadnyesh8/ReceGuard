@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0     # changed-only gating needs the merge base
-      - uses: raceguard/raceguard@v1
+      - uses: Yadnyesh8/ReceGuard@v1
         id: raceguard
         with:
           fail-on: high
@@ -83,7 +83,7 @@ checkout, which works before any release exists.
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/raceguard/raceguard/main/ci/gitlab/raceguard.gitlab-ci.yml
+  - remote: https://raw.githubusercontent.com/Yadnyesh8/ReceGuard/main/ci/gitlab/raceguard.gitlab-ci.yml
 variables:
   RACEGUARD_FAIL_ON: high
   RACEGUARD_BASELINE: .raceguard/baseline.json

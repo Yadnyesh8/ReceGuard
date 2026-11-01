@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 from collections.abc import Iterable
 
+from .. import __version__
 from ..contracts import Patch, ScanResult, Verdict
 
 _CSS = """
@@ -56,7 +57,7 @@ def render(
     verdicts: Iterable[Verdict] = (),
     patches: Iterable[Patch] = (),
     run_id: str = "",
-    tool_version: str = "0.1.0",
+    tool_version: str = __version__,
 ) -> str:
     verdicts = list(verdicts)
     patches = list(patches)

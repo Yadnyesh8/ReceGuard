@@ -270,3 +270,60 @@ def test_a_discarded_patch_that_created_a_file_leaves_nothing_behind(tmp_path):
         ["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True
     ).stdout
     assert porcelain == "", f"tree not clean after restore: {porcelain!r}"
+
+
+def test_test_command_resolves_tools_from_the_venv_without_activation(tmp_path, monkeypatch):
+    """`fix --apply` ran test_command with the bare process PATH. Launched by
+    absolute path (what `raceguard mcp install` writes, and what most CI does)
+    the venv's scripts dir is not on it, so a correct `pytest -q` exited 127
+    and the patch was discarded. migrate had the fix; test_command did not."""
+    import os
+    import stat
+    import sysconfig
+
+    scripts = tmp_path / "venv-scripts"
+    scripts.mkdir()
+    tool = scripts / "rg-probe-tests"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(tool.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(sysconfig, "get_path", lambda name, *a, **k: str(scripts))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # an unactivated launch
+
+    (tmp_path / "repo").mkdir()
+    repo = _repo(tmp_path / "repo")
+    config = _config()
+    config.app.test_command = "rg-probe-tests"
+    result = apply_patch(_patch(DIFF), config, root=repo, run_tests=True)
+    assert result.ok, f"test_command did not resolve from the venv: {result.output}"
+    assert os.environ["PATH"] == "/usr/bin:/bin", "the process PATH itself must be untouched"
+
+
+def test_every_configured_command_gets_the_venv_on_path(monkeypatch):
+    import sysconfig
+
+    from raceguard.config import command_environment
+
+    monkeypatch.setattr(sysconfig, "get_path", lambda name, *a, **k: "/venv/bin")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    env = command_environment({"DATABASE_URL": "postgresql://x"})
+    assert env["PATH"].split(":")[0] == "/venv/bin"
+    assert env["DATABASE_URL"] == "postgresql://x"
+
+
+def test_a_missing_migrate_tool_points_at_installing_the_app():
+    """The README quickstart skipped installing the example app, so every new
+    user's first `verify` hit `alembic: command not found` and was told to
+    "check app.migrate", a file that was already correct."""
+    from raceguard.db import migrate_failure_hint
+
+    hint = migrate_failure_hint("alembic upgrade head", 127)
+    assert "'alembic' is not installed" in hint and "pip install -e ." in hint
+    assert migrate_failure_hint("alembic upgrade head", 1) == "check app.migrate in raceguard.yaml"
+
+
+def test_the_quickstart_installs_the_app_before_verifying():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    quickstart = readme.split("## Sixty seconds", 1)[1].split("```", 2)[1]
+    steps = [line.split("#")[0].strip() for line in quickstart.splitlines() if line.strip()]
+    assert "pip install -e ." in steps, "verify cannot migrate an app that was never installed"
+    assert steps.index("pip install -e .") < steps.index("raceguard verify --target purchase")

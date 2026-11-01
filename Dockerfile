@@ -6,21 +6,23 @@
 #   docker run --rm \
 #     -v /var/run/docker.sock:/var/run/docker.sock \
 #     -v "$PWD:/src:ro" -w /src \
-#     ghcr.io/raceguard/raceguard scan .
+#     ghcr.io/yadnyesh8/receguard scan .
 #
 # `scan` needs no socket at all. Only `verify` and `fix --apply` do.
 #
 # The same image hosts the MCP server:
 #
 #   docker run --rm -p 8765:8765 -e RACEGUARD_MCP_TRANSPORT=http \
-#     -e RACEGUARD_MCP_HOST=0.0.0.0 -e RACEGUARD_MCP_TOKENS=s3cret \
-#     -v "$PWD:/src" ghcr.io/raceguard/raceguard mcp serve
+#     -e RACEGUARD_MCP_HOST=0.0.0.0 -e RACEGUARD_MCP_TOKENS=s3cret:verify \
+#     -v "$PWD:/src" ghcr.io/yadnyesh8/receguard mcp serve
 
 FROM python:3.12-slim AS build
 
 WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY raceguard ./raceguard
+# The wheel force-includes docs/, so the build fails without it.
+COPY docs ./docs
 
 RUN pip install --no-cache-dir build && python -m build --wheel
 
@@ -30,7 +32,7 @@ FROM python:3.12-slim
 LABEL org.opencontainers.image.title="RaceGuard" \
       org.opencontainers.image.description="Find, prove, and repair atomicity violations in Python HTTP handlers." \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.source="https://github.com/raceguard/raceguard"
+      org.opencontainers.image.source="https://github.com/Yadnyesh8/ReceGuard"
 
 # Just the docker CLI binary, so container mode can talk to a mounted socket.
 # `apt-get install docker.io` drags in the whole daemon and roughly triples the
@@ -43,7 +45,7 @@ RUN apt-get update \
 
 COPY --from=build /build/dist/*.whl /tmp/
 # The extras cannot be applied to a glob, so resolve the filename first.
-RUN WHEEL="$(ls /tmp/raceguard-*.whl)" \
+RUN WHEEL="$(ls /tmp/raceguard_cli-*.whl)" \
     && pip install --no-cache-dir "${WHEEL}[harness,mcp]" \
     && rm -f /tmp/*.whl
 

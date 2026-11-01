@@ -50,6 +50,7 @@ class MCPSettings:
     allow_anonymous: bool = False
     allowed_hosts: list[str] = field(default_factory=list)
     session_cap: int = 20
+    session_window_s: int = 86400
     target_cap_per_hour: int = 6
     max_concurrent_verifies: int = 1
     verify_enabled: bool = True
@@ -81,6 +82,7 @@ class MCPSettings:
             allow_anonymous=_bool(env.get("RACEGUARD_MCP_ALLOW_ANONYMOUS"), False),
             allowed_hosts=[h.strip() for h in hosts.split(",") if h.strip()],
             session_cap=_int(env.get("RACEGUARD_MCP_SESSION_CAP"), 20),
+            session_window_s=_int(env.get("RACEGUARD_MCP_SESSION_WINDOW"), 86400),
             target_cap_per_hour=_int(env.get("RACEGUARD_MCP_TARGET_CAP"), 6),
             max_concurrent_verifies=max(1, _int(env.get("RACEGUARD_MCP_MAX_VERIFIES"), 1)),
             verify_enabled=_bool(env.get("RACEGUARD_MCP_VERIFY"), True),

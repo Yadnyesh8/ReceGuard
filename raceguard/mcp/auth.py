@@ -6,8 +6,8 @@ constant time and tokens never reach a log line.
 
 ``RACEGUARD_MCP_TOKENS`` is comma separated; each entry is ``token`` or
 ``token:scope1+scope2`` (scopes joined with ``+`` so the comma stays the entry
-separator). The shipped tools do not gate on scopes; they are recorded on the
-``AccessToken`` for a downstream verifier or middleware that does.
+separator). ``verify_handler`` requires the ``verify`` scope, so a bare token is
+read only.
 """
 
 from __future__ import annotations

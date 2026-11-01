@@ -3,7 +3,7 @@
 # Include it and override variables:
 #
 #   include:
-#     - remote: https://raw.githubusercontent.com/raceguard/raceguard/main/ci/gitlab/raceguard.gitlab-ci.yml
+#     - remote: https://raw.githubusercontent.com/Yadnyesh8/ReceGuard/main/ci/gitlab/raceguard.gitlab-ci.yml
 #   variables:
 #     RACEGUARD_FAIL_ON: high
 #
@@ -26,9 +26,9 @@ variables:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends git > /dev/null
     - |
       if [ -n "$RACEGUARD_VERSION" ]; then
-        pip install --quiet "raceguard[harness]==${RACEGUARD_VERSION}"
+        pip install --quiet "raceguard-cli[harness]==${RACEGUARD_VERSION}"
       else
-        pip install --quiet "raceguard[harness]"
+        pip install --quiet "raceguard-cli[harness]"
       fi
     # A merge request pipeline runs on a detached HEAD; the diff base must be
     # fetchable or changed-only gating degrades to every file (and says so).

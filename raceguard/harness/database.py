@@ -103,7 +103,7 @@ def start_postgres(
     except ImportError as exc:  # pragma: no cover - optional extra
         raise InfrastructureError(
             "the verification harness needs the 'harness' extra",
-            hint="pip install 'raceguard[harness]'",
+            hint="pip install 'raceguard-cli[harness]'",
         ) from exc
 
     if "@sha256:" not in image:

@@ -684,7 +684,7 @@ def doctor(
             __import__(module)
             checks.append((f"import {module}", True, extra))
         except ImportError:
-            checks.append((f"import {module}", False, f"pip install 'raceguard[{extra}]'"))
+            checks.append((f"import {module}", False, f"pip install 'raceguard-cli[{extra}]'"))
 
     try:
         cfg = _load(config)

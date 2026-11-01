@@ -13,16 +13,14 @@ stateless: connect, quote, seed, snapshot, check.
 from __future__ import annotations
 
 import logging
-import os
 import re
 import subprocess
-import sys
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
+from .config import command_environment
 from .errors import InfrastructureError, TargetConfigError
 
 log = logging.getLogger("raceguard.db")
@@ -101,7 +99,7 @@ def connect(url: str, *, autocommit: bool = False) -> Iterator[Connection]:
     except ImportError as exc:  # pragma: no cover - optional extra
         raise InfrastructureError(
             "psycopg is required to talk to PostgreSQL",
-            hint="pip install 'raceguard[harness]'",
+            hint="pip install 'raceguard-cli[harness]'",
         ) from exc
     conn = psycopg.connect(to_sync_url(url), autocommit=autocommit)
     try:
@@ -136,17 +134,8 @@ def create_template(
     template_url = with_database(admin_url, template)
 
     if migrate_command:
-        environment = {
-            **os.environ,
-            **(env or {}),
-            database_url_env: to_driver_url(template_url, driver),
-        }
-        # The migration runs through a plain shell, which does not inherit the
-        # virtualenv RaceGuard itself was launched from. Without this, a
-        # perfectly correct `alembic upgrade head` fails with "command not
-        # found" and the error points at the config rather than at PATH.
-        environment["PATH"] = os.pathsep.join(
-            [str(Path(sys.prefix) / "bin"), environment.get("PATH", "")]
+        environment = command_environment(
+            {**(env or {}), database_url_env: to_driver_url(template_url, driver)}
         )
         try:
             result = subprocess.run(
@@ -166,7 +155,7 @@ def create_template(
             raise InfrastructureError(
                 f"migration command failed with exit code {result.returncode}: "
                 f"{migrate_command!r}\n{result.stdout}\n{result.stderr}",
-                hint="check app.migrate in raceguard.yaml",
+                hint=migrate_failure_hint(migrate_command, result.returncode),
             )
 
     # THE TRAP. Anything still connected to the template makes every
@@ -175,6 +164,24 @@ def create_template(
     _disconnect_all(admin_url, template)
     _assert_template_idle(admin_url, template)
     return template_url
+
+
+def migrate_failure_hint(command: str, returncode: int) -> str:
+    """What to tell the user when app.migrate fails.
+
+    127 is the shell's "command not found". The config is almost always fine
+    then; the application under test is not installed where RaceGuard runs it.
+    Pointing at app.migrate sent every new user following the quickstart off
+    to edit a file that was already correct.
+    """
+    if returncode == 127:
+        executable = command.split()[0] if command.split() else command
+        return (
+            f"{executable!r} is not installed where RaceGuard runs it. Install the "
+            f"application under test and its dependencies into this environment "
+            f"(for example `pip install -e .` in the app's directory), then retry."
+        )
+    return "check app.migrate in raceguard.yaml"
 
 
 def _disconnect_all(admin_url: str, database: str) -> None:

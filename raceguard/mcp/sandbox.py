@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..config import find_config
+from ..config import CONFIG_FILENAME
 
 
 class SandboxViolation(ValueError):
@@ -41,13 +41,34 @@ class Sandbox:
         except ValueError:
             return False
 
+    def find_config(self, start: Path | None = None) -> Path | None:
+        """raceguard.yaml, searched upward from ``start`` but never past the root.
+
+        ``config.find_config`` walks to the filesystem root, which is right for
+        a CLI and wrong here. With no config inside the jail it would load one
+        from a parent directory, and ``verify_handler`` runs that file's
+        ``migrate`` field as a shell command. It is also a plain correctness
+        bug: serve ``monorepo/services/billing`` and the monorepo root's config
+        is silently used instead, with its targets and its migrate command.
+        """
+        here = (start or self.root).resolve()
+        if here.is_file():
+            here = here.parent
+        for directory in [here, *here.parents]:
+            if self.enforce and not self._inside(directory):
+                return None
+            candidate = directory / CONFIG_FILENAME
+            if candidate.is_file():
+                return candidate
+        return None
+
     def anchor(self, path: Path) -> Path:
         """The scan root for a path: config directory, else git root, else the
         sandbox root. Finding ids are relative to it, so it must be stable for
         every tool in a session (see the old project_root note)."""
         start = path if path.is_dir() else path.parent
-        config = find_config(start)
-        if config is not None and self._inside(config.parent.resolve()):
+        config = self.find_config(start)
+        if config is not None:
             return config.parent.resolve()
         for directory in [start, *start.parents]:
             if not self._inside(directory):

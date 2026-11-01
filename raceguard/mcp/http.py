@@ -22,9 +22,9 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from .. import __version__ as TOOL_VERSION
 from .auth import StaticTokenVerifier
-from .budget import current_client
+from .budget import current_client, current_scopes
 from .runtime import Runtime
-from .tools import docker_reachable
+from .tools import docker_needed, docker_reachable
 
 log = logging.getLogger("raceguard.mcp.http")
 
@@ -50,7 +50,7 @@ def register_routes(mcp, runtime: Runtime) -> None:
             import libcst  # noqa: F401
         except ImportError as exc:
             problems.append(f"scanner unavailable: {exc}")
-        if settings.verify_enabled:
+        if settings.verify_enabled and docker_needed():
             now = time.monotonic()
             if ready_cache["docker"] is None or now - ready_cache["at"] > 30:
                 ready_cache["docker"] = await asyncio.to_thread(docker_reachable)
@@ -110,15 +110,23 @@ class HostedApp:
             if identity is None:
                 await _unauthorized(send)
                 return
-            token = current_client.set(identity)
+            client, scopes = identity
+            client_token = current_client.set(client)
+            scopes_token = current_scopes.set(scopes)
             try:
                 await self.app(scope, receive, send)
             finally:
-                current_client.reset(token)
+                current_scopes.reset(scopes_token)
+                current_client.reset(client_token)
             return
         await self.app(scope, receive, send)
 
-    def _identify(self, scope: Scope) -> str | None:
+    def _identify(self, scope: Scope) -> tuple[str, frozenset[str]] | None:
+        # First, because the proxy this mode exists for forwards the header it
+        # authenticated, and that token means nothing to an empty verifier.
+        if self.runtime.settings.allow_anonymous and not self.verifier.configured:
+            client = scope.get("client") or ("anon", 0)
+            return f"anon_{client[0]}", frozenset()
         header = b""
         for name, value in scope.get("headers", []):
             if name == b"authorization":
@@ -128,11 +136,7 @@ class HostedApp:
         if scheme.lower() == "bearer" and credential.strip():
             access = self.verifier.verify(credential.strip())
             if access is not None:
-                return access.subject or access.client_id
-            return None
-        if self.runtime.settings.allow_anonymous and not self.verifier.configured:
-            client = scope.get("client") or ("anon", 0)
-            return f"anon_{client[0]}"
+                return access.subject or access.client_id, frozenset(access.scopes)
         return None
 
     def _draining_receive(self, receive: Receive) -> Receive:

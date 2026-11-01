@@ -110,6 +110,11 @@ def changed_files(base_ref: str | None, *, cwd: Path | None = None) -> tuple[set
     """
     if not base_ref:
         return set(), None
+    if base_ref.startswith("-"):
+        # It reaches `git diff` as an argument; a leading dash is read as an
+        # option (`--output=...`). No provider sends one today, so refuse it
+        # rather than rely on that staying true.
+        return set(), f"refusing diff base {base_ref!r}; gating on every file instead"
     for spec in (f"{base_ref}...HEAD", base_ref):
         try:
             result = subprocess.run(
@@ -136,11 +141,30 @@ def changed_files(base_ref: str | None, *, cwd: Path | None = None) -> tuple[set
 # --------------------------------------------------------------------------
 
 
+def _escape_data(value: str) -> str:
+    """The message part of a workflow command (actions/toolkit escapeData)."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_property(value: str) -> str:
+    """A ``key=value`` property (actions/toolkit escapeProperty).
+
+    Properties also split on ``,`` and end at ``::``, so those escape too. This
+    is a security boundary, not formatting: on a fork pull request the file
+    path comes from the attacker's tree, and git allows a newline in a file
+    name. Unescaped, a file named ``x.py\\n::stop-commands::tok`` injects its
+    own workflow command, and ``stop-commands`` makes the runner ignore every
+    annotation printed after it, erasing RaceGuard's findings from the PR.
+    """
+    return _escape_data(value).replace(":", "%3A").replace(",", "%2C")
+
+
 def github_annotation(level: str, file: str, line: int, title: str, message: str) -> str:
     """A workflow command GitHub renders inline on the diff, no upload needed."""
-    safe = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-    safe_title = title.replace("%", "%25").replace(",", "%2C").replace(":", "%3A")
-    return f"::{level} file={file},line={line},title={safe_title}::{safe}"
+    return (
+        f"::{level} file={_escape_property(file)},line={int(line)},"
+        f"title={_escape_property(title)}::{_escape_data(message)}"
+    )
 
 
 def write_github_outputs(env: Mapping[str, str], values: Mapping[str, object]) -> None:

@@ -18,9 +18,25 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv python install 3.12
       - run: uv pip install --system -e ".[dev,harness,mcp]"
+      # The same gates ci.yml enforces. A release must not be the one path
+      # that skips the type check.
       - run: ruff check raceguard tests
+      - run: ruff format --check raceguard
+      - run: mypy raceguard
       - run: pytest tests -q
       - run: python tests/eval_corpus.py
+      - name: The tag names the version being shipped
+        # The version lives in raceguard/__init__.py and nowhere else; a tag
+        # that disagrees would publish one version under another's name.
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python - <<'PY'
+          import os, raceguard, sys
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          if tag != raceguard.__version__:
+              sys.exit(f"tag v{tag} does not match raceguard.__version__ {raceguard.__version__}")
+          print(f"releasing {tag}")
+          PY
 
   build:
     needs: verify
@@ -32,12 +48,22 @@ jobs:
       - name: Check the built artifacts
         run: |
           uvx twine check dist/*
-          # Prove the wheel actually installs and the console script runs,
-          # rather than discovering it does not after publishing.
+          # Prove what a pip user gets, not what the checkout has. Run from a
+          # directory outside the repo so nothing resolves from the source tree.
           uv venv /tmp/verify
-          VIRTUAL_ENV=/tmp/verify uv pip install dist/*.whl
+          VIRTUAL_ENV=/tmp/verify uv pip install "$(ls dist/*.whl)[mcp]"
+          cd /tmp
           /tmp/verify/bin/raceguard version
           /tmp/verify/bin/raceguard --help > /dev/null
+          /tmp/verify/bin/raceguard mcp install claude-code --project-root /tmp > /dev/null
+          # The MCP server serves these and its prompts send agents to them;
+          # a wheel without them answers every read with an empty list.
+          /tmp/verify/bin/python - <<'PY'
+          from raceguard.mcp.resources import DOCS_DIR
+          docs = sorted(p.stem for p in DOCS_DIR.glob("*.md"))
+          assert "reproduction-rate" in docs, f"docs missing from the wheel: {DOCS_DIR} -> {docs}"
+          print(f"{len(docs)} docs shipped")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -45,6 +71,7 @@ jobs:
 
   publish:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -57,7 +84,8 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   container:
-    needs: verify
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read

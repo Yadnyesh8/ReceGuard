@@ -8,7 +8,7 @@ everything that touches a database.
 ## The sixty second path
 
 ```
-pip install raceguard
+pip install raceguard-cli
 cd examples/shop
 raceguard scan .
 raceguard verify --target purchase

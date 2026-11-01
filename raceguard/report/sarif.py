@@ -23,11 +23,12 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 
+from .. import __version__
 from ..contracts import CodeSpan, Confidence, Finding, HygieneFinding, ScanResult, Verdict
 
 SARIF_VERSION = "2.1.0"
 SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
-DOCS_BASE = "https://github.com/raceguard/raceguard/blob/main/docs/patterns"
+DOCS_BASE = "https://github.com/Yadnyesh8/ReceGuard/blob/main/docs/patterns"
 
 _LEVEL = {
     Confidence.high: "error",
@@ -109,7 +110,7 @@ def build(
     result: ScanResult,
     *,
     verdicts: Iterable[Verdict] = (),
-    tool_version: str = "0.1.0",
+    tool_version: str = __version__,
     category: str | None = None,
 ) -> dict:
     verdict_by_finding: dict[str, Verdict] = {}
@@ -126,7 +127,7 @@ def build(
     driver = {
         "name": "RaceGuard",
         "version": tool_version,
-        "informationUri": "https://github.com/raceguard/raceguard",
+        "informationUri": "https://github.com/Yadnyesh8/ReceGuard",
         "rules": [
             _rule(f"raceguard/{name}", *RULES[name], f"{DOCS_BASE}/{name}.md")
             for name in used_rules

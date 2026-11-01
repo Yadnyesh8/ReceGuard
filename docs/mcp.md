@@ -6,7 +6,7 @@ without leaving the editor. Two transports, one server.
 ## For an editor (stdio)
 
 ```
-pip install "raceguard[harness,mcp]"
+pip install "raceguard-cli[harness,mcp]"
 raceguard mcp install claude-code --write     # or claude-desktop, cursor, vscode
 ```
 
@@ -32,9 +32,9 @@ or, from the container image:
 ```
 docker run --rm -p 8765:8765 \
   -e RACEGUARD_MCP_TRANSPORT=http -e RACEGUARD_MCP_HOST=0.0.0.0 \
-  -e RACEGUARD_MCP_TOKENS=s3cret -e RACEGUARD_MCP_ROOT=/src \
+  -e RACEGUARD_MCP_TOKENS=s3cret:verify -e RACEGUARD_MCP_ROOT=/src \
   -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" \
-  ghcr.io/raceguard/raceguard mcp serve
+  ghcr.io/yadnyesh8/receguard mcp serve
 ```
 
 The endpoints:
@@ -43,7 +43,7 @@ The endpoints:
 |---|---|---|
 | `POST /mcp` | bearer | the protocol |
 | `GET /healthz` | none | liveness |
-| `GET /readyz` | none | 200 when the scanner imports and, if verify is on, Docker answers; 503 with reasons otherwise |
+| `GET /readyz` | none | 200 when the scanner imports and, if verify is on and `RACEGUARD_DATABASE_URL` is unset, Docker answers; 503 with reasons otherwise |
 | `GET /metrics` | none | Prometheus text: tool calls by outcome, verify durations, in-flight, budget refusals |
 | `GET /version` | none | tool and SDK versions |
 
@@ -53,6 +53,11 @@ outright; that flag exists for a reverse proxy that terminates auth on
 `127.0.0.1`. Tokens are `token` or `token:scope+scope`, comma separated,
 compared in constant time, and never logged; the budget is keyed by a hash of
 the token so one client cannot spend another's.
+
+`verify_handler` runs the project's code, so it needs the `verify` scope. A
+token without it can use every other tool. In the example above `s3cret` can
+verify and `readonly-token` cannot. Scopes do not apply over stdio or to
+`--allow-anonymous`, where the proxy decides who gets in.
 
 **DNS rebinding protection and the Host header.** On a loopback bind the
 protection is on and strict, because that is the case the attack targets: a
@@ -84,7 +89,8 @@ torn down, and exits.
 
 Every description opens with the cost, because that line is what the model
 reads when deciding whether to call it. `verify_handler` is capped per client
-session (`RACEGUARD_MCP_SESSION_CAP`, 20) and per target per hour
+in a rolling window (`RACEGUARD_MCP_SESSION_CAP`, 20, over
+`RACEGUARD_MCP_SESSION_WINDOW`, one day) and per target per hour
 (`RACEGUARD_MCP_TARGET_CAP`, 6), and only `RACEGUARD_MCP_MAX_VERIFIES` (1) run
 at once server-wide. Exceeding any of these returns a structured refusal with
 a retry hint; nothing queues invisibly. Tool annotations mark everything but
@@ -112,11 +118,14 @@ from a terminal, which reverifies and runs your tests before keeping it.
 | `RACEGUARD_MCP_HOST`, `_PORT` | `127.0.0.1`, `8765` | HTTP bind |
 | `RACEGUARD_MCP_ROOT` | cwd | sandbox root |
 | `RACEGUARD_MCP_ALLOW_ANY_PATH` | `false` | disable the sandbox (stdio only) |
-| `RACEGUARD_MCP_TOKENS` | empty | bearer tokens |
+| `RACEGUARD_MCP_TOKENS` | empty | bearer tokens; `:verify` allows `verify_handler` |
 | `RACEGUARD_MCP_ALLOW_ANONYMOUS` | `false` | HTTP without tokens, loopback only |
 | `RACEGUARD_MCP_ALLOWED_HOSTS` | bind host | DNS rebinding allowlist |
 | `RACEGUARD_MCP_SESSION_CAP`, `_TARGET_CAP`, `_MAX_VERIFIES` | 20, 6, 1 | budgets |
+| `RACEGUARD_MCP_SESSION_WINDOW` | 86400 | seconds the per-client cap covers |
+| `RACEGUARD_MCP_TRIALS` | 10 | default `verify_handler` trials |
 | `RACEGUARD_MCP_VERIFY` | `true` | disable verification entirely |
+| `RACEGUARD_DATABASE_URL` | unset | use this PostgreSQL instead of a Docker container; remote hosts are refused |
 | `RACEGUARD_MCP_METRICS` | `true` | serve `/metrics` |
 | `RACEGUARD_LOG_FORMAT` | text (json over HTTP) | stderr log shape |
 | `RACEGUARD_MCP_SHUTDOWN_GRACE` | 30 | drain seconds on SIGTERM |

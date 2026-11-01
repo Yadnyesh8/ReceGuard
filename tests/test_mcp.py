@@ -12,7 +12,7 @@ import pytest
 
 from raceguard.errors import ConfigError, UsageError
 from raceguard.mcp.auth import StaticTokenVerifier, client_id_for, parse_tokens
-from raceguard.mcp.budget import Budget, current_client
+from raceguard.mcp.budget import Budget, current_client, current_scopes
 from raceguard.mcp.install import install, snippet
 from raceguard.mcp.sandbox import Sandbox, SandboxViolation
 from raceguard.mcp.server import build, build_http_app
@@ -114,6 +114,19 @@ def test_per_target_cap_carries_a_retry_hint():
     budget.record("a", "t")
     refusal = budget.check("a", "t")
     assert refusal is not None and refusal.retry_after_s is not None
+
+
+def test_session_cap_expires_with_its_window(monkeypatch):
+    """A hosted token has no session end, so the cap must not be permanent."""
+    clock = [1000.0]
+    monkeypatch.setattr("raceguard.mcp.budget.time.monotonic", lambda: clock[0])
+    budget = Budget(session_cap=1, target_cap_per_hour=10, max_concurrent=1, session_window_s=100)
+    budget.record("a", "t")
+    refusal = budget.check("a", "other")
+    assert refusal is not None and refusal.retry_after_s == 100
+    clock[0] += 101
+    assert budget.check("a", "other") is None
+    assert "a" not in budget._calls  # an idle client leaves nothing behind
 
 
 def test_verify_slots_return_busy_rather_than_blocking():
@@ -254,6 +267,27 @@ def test_anonymous_loopback_is_allowed_when_configured():
     asyncio.run(go())
 
 
+def test_anonymous_mode_ignores_a_forwarded_authorization_header():
+    async def go():
+        async with _App(_settings(tokens=[], allow_anonymous=True)) as app:
+            assert (await app.rpc("tools/list", token="from-the-proxy")).status_code == 200
+
+    asyncio.run(go())
+
+
+def test_readyz_needs_docker_only_without_a_database_url(monkeypatch):
+    monkeypatch.setattr("raceguard.mcp.http.docker_reachable", lambda: False)
+
+    async def go():
+        async with _App(_settings(verify_enabled=True)) as app:
+            ready = await app.client.get("/readyz")
+            assert ready.status_code == 503 and "docker" in ready.json()["problems"][0]
+            monkeypatch.setenv("RACEGUARD_DATABASE_URL", "postgresql://localhost/db")
+            assert (await app.client.get("/readyz")).status_code == 200
+
+    asyncio.run(go())
+
+
 def test_every_tool_is_listed_with_cost_and_annotations():
     async def go():
         async with _App(_settings()) as app:
@@ -321,7 +355,7 @@ def test_verify_disabled_refuses_cleanly():
 
 def test_verify_unknown_target_is_refused_without_booting_anything():
     async def go():
-        async with _App(_settings(verify_enabled=True)) as app:
+        async with _App(_settings(tokens=["secret:verify"], verify_enabled=True)) as app:
             r = await app.rpc(
                 "tools/call", {"name": "verify_handler", "arguments": {"target_id": "nope"}}
             )
@@ -381,7 +415,9 @@ def test_client_identity_reaches_the_budget():
     second budget. Proven through the real protocol, not by calling the tool."""
 
     async def go():
-        async with _App(_settings(tokens=["a", "b"], session_cap=1, verify_enabled=True)) as app:
+        async with _App(
+            _settings(tokens=["a:verify", "b:verify"], session_cap=1, verify_enabled=True)
+        ) as app:
             # Unknown target still records nothing, so force the budget through check():
             assert app.runtime.budget.check(client_id_for("a"), "x") is None
             app.runtime.budget.record(client_id_for("a"), "x")
@@ -397,6 +433,27 @@ def test_client_identity_reaches_the_budget():
                 token="b",
             )
             assert r.json()["result"]["structuredContent"]["summary"] == "refused: unknown target"
+
+    asyncio.run(go())
+
+
+def test_verify_needs_the_verify_scope():
+    call = {"name": "verify_handler", "arguments": {"target_id": "nope"}}
+
+    async def go():
+        tokens = ["bare", "other:read", "good:read+verify"]
+        async with _App(_settings(tokens=tokens, verify_enabled=True)) as app:
+            for token in ("bare", "other"):
+                result = (await app.rpc("tools/call", call, token=token)).json()["result"]
+                assert result["structuredContent"]["summary"] == "refused: scope"
+            result = (await app.rpc("tools/call", call, token="good")).json()["result"]
+            assert result["structuredContent"]["summary"] == "refused: unknown target"
+            read = {"name": "list_targets", "arguments": {}}
+            result = (await app.rpc("tools/call", read, token="bare")).json()["result"]
+            assert not result.get("isError")
+            # A refusal spends nothing.
+            assert app.runtime.budget.refusals == 0
+            assert current_scopes.get() == frozenset()
 
     asyncio.run(go())
 
@@ -541,3 +598,77 @@ def test_wildcard_bind_does_not_reject_every_client():
         build_http_app(_settings(host="127.0.0.1", port=9999))
     assert captured["enable_dns_rebinding_protection"] is True
     assert "127.0.0.1:*" in captured["allowed_hosts"]
+
+
+# -- production review regressions ------------------------------------------
+
+
+def test_config_lookup_never_leaves_the_sandbox(tmp_path: Path):
+    """find_config walks to the filesystem root. With no config inside the
+    jail the server loaded one from a parent directory, and verify_handler runs
+    that file's `migrate` field as a shell command."""
+    (tmp_path / "raceguard.yaml").write_text("version: 1\napp:\n  module: 'x:app'\ntargets: []\n")
+    project = tmp_path / "project"
+    project.mkdir()
+    box = Sandbox(project)
+    assert box.find_config() is None, "a config outside the jail was loaded"
+    assert box.anchor(project) == project.resolve()
+
+    inside = project / "raceguard.yaml"
+    inside.write_text("version: 1\napp:\n  module: 'x:app'\ntargets: []\n")
+    assert box.find_config() == inside
+    (project / "sub").mkdir()
+    assert box.find_config(project / "sub") == inside, (
+        "a config between start and root is still found"
+    )
+
+
+def test_verify_handler_refuses_rather_than_load_an_outside_config(tmp_path: Path):
+    (tmp_path / "raceguard.yaml").write_text(
+        "version: 1\napp:\n  module: 'x:app'\n  migrate: 'echo OUTSIDE'\n"
+        "targets:\n  - id: t\n    route: 'POST /x'\n"
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    mcp, runtime = build(MCPSettings(transport="stdio", project_root=project))
+
+    async def go():
+        res = await mcp.call_tool("verify_handler", {"target_id": "t"})
+        return (res.structured_content or {}).get("result", res.structured_content)
+
+    payload = asyncio.run(go())
+    assert payload["summary"] == "refused: configuration"
+    assert runtime.budget.in_flight == 0
+
+
+def test_refused_verify_calls_do_not_grow_server_memory():
+    """The budget check runs before the target is validated. Indexing the
+    defaultdict inserted an entry per made-up id: 200k calls held 186 MB."""
+    budget = Budget(session_cap=20, target_cap_per_hour=6, max_concurrent=1)
+    for i in range(10_000):
+        budget.check("tok_client", f"no-such-target-{i}")
+    assert len(budget._per_target) == 0
+    # and the cap still bites for a real target
+    capped = Budget(session_cap=100, target_cap_per_hour=2, max_concurrent=1)
+    for _ in range(2):
+        assert capped.check("c", "purchase") is None
+        capped.record("c", "purchase")
+    assert capped.check("c", "purchase") is not None
+
+
+def test_docs_resolve_from_a_wheel_layout_first(tmp_path: Path, monkeypatch):
+    """A wheel carries the docs as raceguard/_docs; only a checkout has them at
+    the repository root. The server looked only at the root, so every
+    pip-installed copy answered docs reads with an empty list."""
+    import raceguard.mcp.resources as resources
+
+    package = tmp_path / "site-packages" / "raceguard"
+    (package / "mcp").mkdir(parents=True)
+    (package / "_docs").mkdir()
+    fake = package / "mcp" / "resources.py"
+    fake.write_text("")
+    monkeypatch.setattr(resources, "__file__", str(fake))
+    assert resources._docs_dir() == (package / "_docs").resolve()
+
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    assert '"docs" = "raceguard/_docs"' in pyproject, "the wheel must ship the docs"

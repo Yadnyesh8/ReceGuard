@@ -36,3 +36,9 @@ coverage.xml
 # Local overrides
 raceguard.local.yaml
 .env
+
+# Claude Code: local agent config, settings and memory
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json

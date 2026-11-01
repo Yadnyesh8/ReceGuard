@@ -29,7 +29,7 @@ from pathlib import Path
 import libcst as cst
 from libcst.codemod import CodemodContext
 
-from ..config import Config, Target
+from ..config import Config, Target, command_environment
 from ..contracts import Finding, Invariant, Migration, Patch, Verdict
 from ..errors import ConfigError, UsageError
 from . import migrations as migration_ops
@@ -366,6 +366,7 @@ def _verify_and_keep(
             config.app.test_command,
             shell=True,
             cwd=root,
+            env=command_environment(),
             capture_output=True,
             text=True,
             timeout=1800,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -19,10 +20,10 @@ from pathlib import Path
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
-from ..config import find_config, load_config
+from ..config import load_config
 from ..contracts import Confidence, Patch, ScanResult, Verdict
 from ..errors import RaceGuardError
-from .budget import current_client
+from .budget import VERIFY_SCOPE, current_client, current_scopes
 from .runtime import Runtime
 from .sandbox import SandboxViolation
 
@@ -223,7 +224,7 @@ def register(mcp, runtime: Runtime) -> None:
         resolved = _sandboxed(config_path) if config_path else None
         if isinstance(resolved, ToolError):
             return resolved
-        found = resolved if resolved else find_config(sandbox.root)
+        found = resolved if resolved else sandbox.find_config()
         if found is None or not Path(found).is_file():
             metrics.observe_call("list_targets", "missing")
             return ToolError(
@@ -267,7 +268,7 @@ def register(mcp, runtime: Runtime) -> None:
                 hint="run analyze_handler first and use an id from its output",
             )
         invariant = None
-        config_path = find_config(root)
+        config_path = sandbox.find_config(root)
         if config_path is not None:
             try:
                 config = load_config(str(config_path))
@@ -332,14 +333,14 @@ def register(mcp, runtime: Runtime) -> None:
             checks.append({"check": "scanner", "ok": True, "detail": "libcst importable"})
         except ImportError as exc:
             checks.append({"check": "scanner", "ok": False, "detail": str(exc)})
-        if settings.verify_enabled:
+        if settings.verify_enabled and docker_needed():
             checks.append(
                 {"check": "docker", "ok": docker_reachable(), "detail": "needed by verify_handler"}
             )
         checks.append(
             {"check": "project root", "ok": sandbox.root.is_dir(), "detail": str(sandbox.root)}
         )
-        config = find_config(sandbox.root)
+        config = sandbox.find_config()
         checks.append(
             {
                 "check": "raceguard.yaml",
@@ -379,6 +380,20 @@ def register(mcp, runtime: Runtime) -> None:
                 error="verify_handler is disabled on this server", summary="refused: disabled"
             )
 
+        # Only bearer tokens carry scopes. stdio is the user's own process, and
+        # anonymous HTTP has its auth at the proxy in front of it.
+        if settings.transport == "http" and settings.tokens:
+            if VERIFY_SCOPE not in current_scopes.get():
+                metrics.observe_call("verify_handler", "forbidden")
+                return VerifyResult(
+                    error=(
+                        f"this token lacks the {VERIFY_SCOPE!r} scope. verify_handler runs the "
+                        f"project's code; add :{VERIFY_SCOPE} to the token's entry in "
+                        f"RACEGUARD_MCP_TOKENS, or run `raceguard verify` from a terminal."
+                    ),
+                    summary="refused: scope",
+                )
+
         client = current_client.get()
         refusal = budget.check(client, target_id)
         if refusal:
@@ -392,7 +407,14 @@ def register(mcp, runtime: Runtime) -> None:
             metrics.observe_call("verify_handler", "refused")
             return VerifyResult(error=resolved.error, summary="refused: sandbox")
         try:
-            config = load_config(str(resolved) if resolved else None, start=sandbox.root)
+            config_file = resolved or sandbox.find_config()
+            if config_file is None:
+                metrics.observe_call("verify_handler", "error")
+                return VerifyResult(
+                    error=f"no raceguard.yaml inside {sandbox.root}",
+                    summary="refused: configuration",
+                )
+            config = load_config(str(config_file))
         except RaceGuardError as exc:
             metrics.observe_call("verify_handler", "error")
             return VerifyResult(error=exc.render(), summary="refused: configuration")
@@ -461,6 +483,11 @@ def register(mcp, runtime: Runtime) -> None:
             summary=summary,
             warnings=warnings,
         )
+
+
+def docker_needed() -> bool:
+    """verify_handler runs in process, so Docker only ever supplies its database."""
+    return not os.environ.get("RACEGUARD_DATABASE_URL")
 
 
 def docker_reachable(timeout_s: float = 5.0) -> bool:

@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import __version__ as TOOL_VERSION
 from ..config import Config, find_config, load_config
 from ..contracts import Confidence, Finding, ScanResult, Verdict
 from ..errors import EXIT_CONFIG, EXIT_FINDINGS, EXIT_INFRA, EXIT_OK, RaceGuardError
@@ -35,7 +36,6 @@ from .providers import ProviderContext
 
 log = logging.getLogger("raceguard.ci")
 
-TOOL_VERSION = "0.1.0"
 ANNOTATION_CAP = 50
 
 
@@ -340,7 +340,10 @@ def _docker_reachable(timeout_s: float = 10.0) -> bool:
 def _write_outputs(result: CIResult, options: CIOptions, root: Path) -> None:
     if options.sarif:
         document = sarif_report.build(
-            result.scan, verdicts=result.verdicts, category=options.category
+            result.scan,
+            verdicts=result.verdicts,
+            category=options.category,
+            tool_version=TOOL_VERSION,
         )
         path = _write(root, options.sarif, json.dumps(document, indent=2))
         result.written["sarif"] = str(path)

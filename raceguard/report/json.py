@@ -5,6 +5,7 @@ from __future__ import annotations
 import json as _json
 from collections.abc import Iterable
 
+from .. import __version__
 from ..contracts import Patch, RunArtifact, ScanResult, Verdict
 
 FORMAT_VERSION = 1
@@ -15,7 +16,7 @@ def build(
     scan: ScanResult | None = None,
     verdicts: Iterable[Verdict] = (),
     patches: Iterable[Patch] = (),
-    tool_version: str = "0.1.0",
+    tool_version: str = __version__,
     run_id: str = "",
 ) -> dict:
     return {

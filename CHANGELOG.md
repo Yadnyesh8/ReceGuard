@@ -24,6 +24,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   prompts, tool annotations and drain-on-shutdown. `raceguard.mcp_server` stays
   as a shim.
 
+### Security
+
+- `verify_handler` over HTTP now requires the `verify` token scope. Scopes were
+  parsed but never checked, so a read-only token could run project code. Add
+  `:verify` to any token that should keep verifying.
+
+### Fixed
+
+- `--allow-anonymous` no longer returns 401 when a reverse proxy forwards its
+  `Authorization` header.
+- The per-client verify cap is a rolling window (`RACEGUARD_MCP_SESSION_WINDOW`,
+  one day). It used to lock a hosted token out until the server restarted.
+- `/readyz` and `doctor` no longer require Docker when `RACEGUARD_DATABASE_URL`
+  supplies the database.
+
 
 ## [0.1.0] - 2026-08-31
 
@@ -71,5 +86,5 @@ First release.
 - `mode: inprocess` cannot reproduce races that depend on more than one
   process. Every verdict records the mode it ran in.
 
-[Unreleased]: https://github.com/raceguard/raceguard/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/raceguard/raceguard/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Yadnyesh8/ReceGuard/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Yadnyesh8/ReceGuard/releases/tag/v0.1.0

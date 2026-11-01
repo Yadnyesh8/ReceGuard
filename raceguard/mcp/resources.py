@@ -11,11 +11,27 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..config import find_config, load_config
+from ..config import load_config
 from ..errors import RaceGuardError
 from .runtime import Runtime
 
-DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
+
+def _docs_dir() -> Path:
+    """Where the Markdown lives in this install.
+
+    A wheel carries it as ``raceguard/_docs`` (see the hatch force-include);
+    a source checkout or an editable install has it at the repository root.
+    Only the second existed before, so every pip-installed server returned an
+    empty list for the very documents its own prompts point agents at.
+    """
+    package = Path(__file__).resolve().parents[1]
+    packaged = package / "_docs"
+    if packaged.is_dir():
+        return packaged
+    return package.parent / "docs"
+
+
+DOCS_DIR = _docs_dir()
 
 
 def register(mcp, runtime: Runtime) -> None:
@@ -24,7 +40,7 @@ def register(mcp, runtime: Runtime) -> None:
     @mcp.resource("raceguard://config", mime_type="application/json")
     def config_resource() -> str:
         """The project's raceguard.yaml, resolved and with secrets redacted."""
-        found = find_config(sandbox.root)
+        found = sandbox.find_config()
         if found is None:
             return json.dumps(
                 {"error": f"no raceguard.yaml under {sandbox.root}", "hint": "run `raceguard init`"}

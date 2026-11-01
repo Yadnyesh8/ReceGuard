@@ -24,7 +24,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 
-from ..config import SynthConfig
+from ..config import SynthConfig, command_environment
 from ..contracts import Invariant, InvariantKind
 from .schema import Schema
 
@@ -404,6 +404,7 @@ def _call_model(prompt: str, settings: SynthConfig) -> str | None:
             result = subprocess.run(
                 settings.command,
                 shell=True,
+                env=command_environment(),
                 input=json.dumps({"prompt": prompt, "version": PROMPT_VERSION}),
                 capture_output=True,
                 text=True,

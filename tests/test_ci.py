@@ -519,3 +519,54 @@ def test_a_finding_on_a_changed_route_still_selects_its_target(repo: Path):
     # handler deliberately unset: selection must still work off the finding.
     config = Config(app={"module": "m:app"}, targets=[Target(id="purchase", route="POST /orders")])
     assert targets_in_diff(config, result.scan.findings, {"orders.py"}) == ["purchase"]
+
+
+# -- production review regressions ------------------------------------------
+
+
+def test_a_crafted_filename_cannot_inject_a_workflow_command():
+    """On a fork PR the file path is attacker controlled, and git allows a
+    newline in a file name. Unescaped, `x.py\\n::stop-commands::tok` makes the
+    runner ignore every annotation after it, erasing the findings from the PR."""
+    evil = "shop/x.py,line=1::\n::stop-commands::pwned\n::error file=fake.py"
+    line = github_annotation("error", evil, 24, "raceguard: oversell\n::x", "msg\n::y")
+    # A workflow command is only recognised at the START of a line, so the
+    # property that matters is: one line, with no raw separator in the
+    # properties. `::` may appear in the message data; mid-line it is inert,
+    # which is why the spec does not escape `:` there.
+    assert "\n" not in line and "\r" not in line
+    head, sep, _message = line.removeprefix("::error ").partition("::")
+    assert sep == "::"
+    assert ":" not in head.replace("%3A", ""), f"a raw ':' escaped into the properties: {head!r}"
+    assert head.startswith("file=shop/x.py%2Cline=1%3A%3A%0A")
+    assert head.count(",") == 2, "only line= and title= may follow file= as properties"
+
+
+def test_ci_reports_carry_the_package_version(repo: Path, monkeypatch):
+    """SARIF from `raceguard ci` used the builder's frozen "0.1.0" default, so
+    every alert after the first release would be attributed to the wrong
+    version. It must follow the one version source."""
+    import raceguard.ci as engine
+
+    monkeypatch.setattr(engine, "TOOL_VERSION", "9.8.7")
+    run(_options(repo, fail_on="never", sarif="v.sarif", json_path="v.json"))
+    assert (
+        json.loads((repo / "v.sarif").read_text())["runs"][0]["tool"]["driver"]["version"]
+        == "9.8.7"
+    )
+    assert json.loads((repo / "v.json").read_text())["tool"]["version"] == "9.8.7"
+
+
+def test_the_version_has_exactly_one_source():
+    import raceguard
+    from raceguard.ci import TOOL_VERSION
+
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    assert 'dynamic = ["version"]' in pyproject
+    assert '\nversion = "' not in pyproject, "a second hardcoded version will drift"
+    assert TOOL_VERSION == raceguard.__version__
+
+
+def test_a_diff_base_that_looks_like_an_option_is_refused(repo: Path):
+    files, notice = changed_files("--output=/tmp/x", cwd=repo)
+    assert files == set() and notice and "refusing" in notice

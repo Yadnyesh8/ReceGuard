@@ -88,6 +88,7 @@ class Runtime:
             sandbox=Sandbox(settings.project_root, enforce=enforce),
             budget=Budget(
                 session_cap=settings.session_cap,
+                session_window_s=settings.session_window_s,
                 target_cap_per_hour=settings.target_cap_per_hour,
                 max_concurrent=settings.max_concurrent_verifies,
             ),

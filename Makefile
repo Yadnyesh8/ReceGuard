@@ -5,7 +5,7 @@ PY ?= .venv/bin/python
 UV ?= uv
 
 .DEFAULT_GOAL := help
-.PHONY: help setup lint format types test test-fast test-docker gates check build image clean
+.PHONY: help setup demo lint format types test test-fast test-docker gates check build image clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -15,6 +15,9 @@ setup: ## Create the venv and install everything
 	$(UV) venv
 	VIRTUAL_ENV=.venv $(UV) pip install -e ".[dev,harness,mcp]"
 	$(PY) -m pre_commit install || true
+
+demo: ## Run the live demo, pausing at each step
+	$(PY) demo/demo.py
 
 lint: ## Lint
 	$(PY) -m ruff check raceguard tests

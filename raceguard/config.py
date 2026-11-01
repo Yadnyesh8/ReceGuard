@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import re
+import sysconfig
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -366,3 +368,24 @@ def _format_errors(exc: ValidationError) -> str:
 def dump_config(config: Config) -> str:
     data = config.model_dump(mode="json", exclude={"path"}, exclude_none=True)
     return yaml.safe_dump(data, sort_keys=False, width=100)
+
+
+def command_environment(extra: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment a configured shell command runs in.
+
+    ``app.migrate``, ``app.test_command`` and ``synth.command`` all run through
+    a plain shell, which inherits this process's PATH and nothing more. Unless
+    the virtualenv was activated, its scripts directory is not on that PATH:
+    a host launching ``/venv/bin/raceguard`` by absolute path (exactly what
+    ``raceguard mcp install`` writes) and a CI job that never activates the
+    venv both leave ``alembic`` and ``pytest`` unresolvable. A correct config
+    then fails with exit 127 and the error points at the config, not at PATH.
+
+    ``sysconfig`` rather than ``sys.prefix/bin``: the scripts directory is
+    ``Scripts`` on Windows.
+    """
+    environment = {**os.environ, **(extra or {})}
+    scripts = sysconfig.get_path("scripts")
+    if scripts:
+        environment["PATH"] = os.pathsep.join([scripts, environment.get("PATH", "")])
+    return environment

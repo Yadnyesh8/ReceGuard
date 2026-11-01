@@ -324,9 +324,9 @@ documented second entrypoint: `raceguard mcp serve --transport http --host
 * Nothing under `raceguard/mcp/` writes to the project tree. Run artifacts go
   under `.raceguard/runs/` exactly as the CLI's do.
 * Tokens are compared in constant time and never logged. `RACEGUARD_MCP_TOKENS`
-  format: `token` or `token:scope1+scope2`, entries comma separated. Scopes are
-  recorded on the `AccessToken` for a downstream verifier; the shipped tools do
-  not gate on them.
+  format: `token` or `token:scope1+scope2`, entries comma separated.
+  `verify_handler` requires the `verify` scope; every other tool takes any
+  valid token.
 
 ## 6. Test plan
 
