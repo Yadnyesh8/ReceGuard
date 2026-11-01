@@ -30,6 +30,12 @@ def test_defaults_are_the_safe_ones():
     assert s.tokens == [] and not s.allow_anonymous and not s.allow_any_path
 
 
+def test_platform_port_is_used_unless_overridden():
+    assert MCPSettings.from_env({}).port == 8765
+    assert MCPSettings.from_env({"PORT": "8080"}).port == 8080
+    assert MCPSettings.from_env({"PORT": "8080", "RACEGUARD_MCP_PORT": "9000"}).port == 9000
+
+
 def test_http_without_tokens_is_refused_unless_anonymous_on_loopback():
     with pytest.raises(ConfigError):
         MCPSettings.from_env({"RACEGUARD_MCP_TRANSPORT": "http"}).validate()

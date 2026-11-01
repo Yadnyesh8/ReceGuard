@@ -38,6 +38,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one day). It used to lock a hosted token out until the server restarted.
 - `/readyz` and `doctor` no longer require Docker when `RACEGUARD_DATABASE_URL`
   supplies the database.
+- The MCP server honours `PORT`, as hosts such as Render expect. `RACEGUARD_MCP_PORT` still
+  wins.
 
 
 ## [0.1.0] - 2026-08-31

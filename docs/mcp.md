@@ -74,6 +74,36 @@ allowed) to turn enforcement back on once you know the external name.
 `RACEGUARD_MCP_SHUTDOWN_GRACE` seconds (default 30) so their containers are
 torn down, and exits.
 
+## On Render
+
+Render's free web service has no Docker daemon, so `verify_handler` stays off
+and the service is a scanner for the shop example, which
+`deploy/render/Dockerfile` builds into the image. It needs no card or GitHub
+link. In the Render dashboard, create a web service and choose:
+
+| Field | Value |
+|---|---|
+| Source | Public Git Repository, `https://github.com/Yadnyesh8/ReceGuard` |
+| Branch | the branch to serve |
+| Language | Docker |
+| Dockerfile Path | `deploy/render/Dockerfile` |
+| Instance Type | Free |
+| Health Check Path | `/healthz` |
+| Environment | `RACEGUARD_MCP_TOKENS` set to a long random token |
+
+The server listens on the `PORT` Render assigns. Clients connect to the service
+URL with `/mcp` on the end:
+
+```
+claude mcp add --transport http raceguard https://SERVICE.onrender.com/mcp \
+  --header "Authorization: Bearer YOUR-TOKEN"
+```
+
+A public repository URL does not auto-deploy, so redeploy by hand to pick up new
+commits. Free services sleep after 15 minutes without traffic and take about a
+minute to wake, so the first call after a quiet spell may time out and need a
+retry.
+
 ## Tools
 
 | Tool | Cost | Notes |
@@ -115,7 +145,7 @@ from a terminal, which reverifies and runs your tests before keeping it.
 | Env | Default | Meaning |
 |---|---|---|
 | `RACEGUARD_MCP_TRANSPORT` | `stdio` | `stdio` or `http` |
-| `RACEGUARD_MCP_HOST`, `_PORT` | `127.0.0.1`, `8765` | HTTP bind |
+| `RACEGUARD_MCP_HOST`, `_PORT` | `127.0.0.1`, `PORT` or `8765` | HTTP bind |
 | `RACEGUARD_MCP_ROOT` | cwd | sandbox root |
 | `RACEGUARD_MCP_ALLOW_ANY_PATH` | `false` | disable the sandbox (stdio only) |
 | `RACEGUARD_MCP_TOKENS` | empty | bearer tokens; `:verify` allows `verify_handler` |

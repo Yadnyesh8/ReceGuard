@@ -75,7 +75,8 @@ class MCPSettings:
         return cls(
             transport=transport,  # type: ignore[arg-type]
             host=env.get("RACEGUARD_MCP_HOST", "127.0.0.1"),
-            port=_int(env.get("RACEGUARD_MCP_PORT"), 8765),
+            # PORT is how Cloud Run and most container platforms assign one.
+            port=_int(env.get("RACEGUARD_MCP_PORT") or env.get("PORT"), 8765),
             project_root=Path(root).resolve() if root else Path.cwd().resolve(),
             allow_any_path=_bool(env.get("RACEGUARD_MCP_ALLOW_ANY_PATH"), False),
             tokens=tokens,
