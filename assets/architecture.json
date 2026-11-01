@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RaceGuard system design",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1150,
+      560
+    ],
+    "visual_preset": "editorial"
+  },
+  "components": [
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "raceguard CLI",
+      "sublabel": "scan, verify, fix",
+      "pos": [
+        30,
+        60
+      ],
+      "size": [
+        160,
+        72
+      ]
+    },
+    {
+      "id": "ci",
+      "type": "frontend",
+      "label": "CI engine",
+      "sublabel": "Action, GitLab, any CI",
+      "pos": [
+        30,
+        230
+      ],
+      "size": [
+        160,
+        72
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "frontend",
+      "label": "MCP server",
+      "sublabel": "stdio or HTTP",
+      "pos": [
+        30,
+        400
+      ],
+      "size": [
+        160,
+        72
+      ]
+    },
+    {
+      "id": "scanner",
+      "type": "backend",
+      "label": "Scanner",
+      "sublabel": "libcst, findings",
+      "pos": [
+        250,
+        230
+      ],
+      "size": [
+        150,
+        72
+      ]
+    },
+    {
+      "id": "synth",
+      "type": "backend",
+      "label": "Invariant synth",
+      "sublabel": "SQL check for violations",
+      "pos": [
+        480,
+        230
+      ],
+      "size": [
+        170,
+        72
+      ]
+    },
+    {
+      "id": "model",
+      "type": "external",
+      "label": "Model",
+      "sublabel": "optional, spec reading",
+      "pos": [
+        480,
+        60
+      ],
+      "size": [
+        170,
+        72
+      ]
+    },
+    {
+      "id": "harness",
+      "type": "backend",
+      "label": "Harness",
+      "sublabel": "trials, verdict",
+      "pos": [
+        730,
+        230
+      ],
+      "size": [
+        150,
+        72
+      ]
+    },
+    {
+      "id": "governor",
+      "type": "security",
+      "label": "Governor",
+      "sublabel": "budget and ownership",
+      "pos": [
+        720,
+        60
+      ],
+      "size": [
+        170,
+        72
+      ]
+    },
+    {
+      "id": "report",
+      "type": "backend",
+      "label": "Reports",
+      "sublabel": "text, SARIF, HTML",
+      "pos": [
+        960,
+        230
+      ],
+      "size": [
+        160,
+        72
+      ]
+    },
+    {
+      "id": "patch",
+      "type": "backend",
+      "label": "Patch engine",
+      "sublabel": "codemods, migrations",
+      "pos": [
+        480,
+        400
+      ],
+      "size": [
+        170,
+        72
+      ]
+    },
+    {
+      "id": "app",
+      "type": "external",
+      "label": "App under test",
+      "sublabel": "your FastAPI handlers",
+      "pos": [
+        720,
+        400
+      ],
+      "size": [
+        170,
+        72
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "ephemeral, per run",
+      "pos": [
+        950,
+        400
+      ],
+      "size": [
+        170,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Throwaway run",
+      "wraps": [
+        "app",
+        "postgres"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "cli-scan",
+      "from": "cli",
+      "to": "scanner",
+      "variant": "default"
+    },
+    {
+      "id": "ci-scan",
+      "from": "ci",
+      "to": "scanner",
+      "variant": "default"
+    },
+    {
+      "id": "mcp-scan",
+      "from": "mcp",
+      "to": "scanner",
+      "variant": "default"
+    },
+    {
+      "id": "scan-synth",
+      "from": "scanner",
+      "to": "synth",
+      "label": "finding",
+      "variant": "emphasis"
+    },
+    {
+      "id": "synth-harness",
+      "from": "synth",
+      "to": "harness",
+      "label": "invariant",
+      "variant": "emphasis"
+    },
+    {
+      "id": "harness-report",
+      "from": "harness",
+      "to": "report",
+      "label": "verdict",
+      "variant": "emphasis"
+    },
+    {
+      "id": "synth-model",
+      "from": "synth",
+      "to": "model",
+      "label": "proposal",
+      "variant": "dashed"
+    },
+    {
+      "id": "governor-harness",
+      "from": "governor",
+      "to": "harness",
+      "label": "limits",
+      "variant": "security",
+      "labelAt": [
+        805,
+        191
+      ]
+    },
+    {
+      "id": "harness-app",
+      "from": "harness",
+      "to": "app",
+      "label": "concurrent HTTP",
+      "labelAt": [
+        805,
+        330
+      ]
+    },
+    {
+      "id": "app-postgres",
+      "from": "app",
+      "to": "postgres",
+      "label": "SQL"
+    },
+    {
+      "id": "synth-patch",
+      "from": "synth",
+      "to": "patch",
+      "label": "propose",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        565,
+        351
+      ]
+    },
+    {
+      "id": "patch-app",
+      "from": "patch",
+      "to": "app",
+      "label": "diff",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Find",
+      "items": [
+        "Scanner flags read, decide, write windows in handlers",
+        "Needs no Docker or database",
+        "On Render, verify is off because there is no Docker"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Prove",
+      "items": [
+        "Harness fires real concurrent requests",
+        "One violating trial proves the defect",
+        "Zero violations is bounded evidence only"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Repair",
+      "items": [
+        "fix prints a diff and writes nothing",
+        "--apply reruns the harness and your tests, and keeps the change only if both pass"
+      ]
+    }
+  ]
+}

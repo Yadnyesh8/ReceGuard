@@ -57,6 +57,32 @@ both orders are recorded, and stock ends at zero: two units sold from a stock
 of one. The generated patch moves the comparison into the `UPDATE`, after which
 exactly one buyer wins every time.
 
+## How it works
+
+[![RaceGuard system design](assets/architecture.png)](assets/architecture.html)
+
+The CLI, the CI engine and the MCP server all call the same pipeline.
+[assets/architecture.html](assets/architecture.html) is the interactive version;
+download it and open it in a browser.
+
+The scanner parses each handler with libcst and reports a finding when it sees
+a read, a decision and a write with no guard between them. This step needs no
+Docker and no database.
+
+The invariant synthesizer turns a finding into SQL that returns rows only when
+the invariant is broken. It tries your `raceguard.yaml` first, then a spec
+sentence, then the reflected schema. A model is optional. It can read the spec
+sentence, but whatever it proposes goes through the same four-step mechanical
+gate as everything else.
+
+The harness then runs the trials under the governor's limits. Each trial creates
+a database, seeds it, fires concurrent requests at your app, runs the check SQL
+and drops the database. The verdict goes to the report renderers.
+
+`raceguard fix` prints a diff from the patch engine and writes nothing. With
+`--apply`, RaceGuard applies the diff, runs the migration, reverifies the target
+and runs your test command. It keeps the change only if both pass.
+
 ## Installing
 
 ```bash
@@ -110,7 +136,9 @@ raceguard mcp serve --transport http --port 8765   # hosted, with RACEGUARD_MCP_
 
 Every path is sandboxed to the project root, verification is budgeted per
 client, and `/healthz`, `/readyz` and `/metrics` are there for whoever runs
-it. See [docs/mcp.md](docs/mcp.md).
+it. Over HTTP, `verify_handler` needs a token with the `verify` scope. To host a
+scan-only server for free, see [On Render](docs/mcp.md#on-render). Everything
+else is in [docs/mcp.md](docs/mcp.md).
 
 ### As a pre-commit hook
 
@@ -167,10 +195,10 @@ correct, so it is reported at reduced confidence rather than cleared.
 
 Every target is verified twice:
 
-* **amplified** — a delay is inserted after the first read of the table under
+* **amplified**: a delay is inserted after the first read of the table under
   test. This proves the window exists and can be entered. It is the structural
   claim.
-* **natural** — no help at all. This measures how often it fires unaided. It is
+* **natural**: no help at all. This measures how often it fires unaided. It is
   the operational claim.
 
 They are reported separately on purpose. The difference between "your code has
